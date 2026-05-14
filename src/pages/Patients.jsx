@@ -7,6 +7,14 @@ function appPath(path) {
   return window.location.pathname.startsWith("/doctor") ? `/doctor${path}` : path;
 }
 
+function displayPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits.slice(2);
+  }
+  return value || "-";
+}
+
 export default function Patients({ clinicId, user }) {
   const navigate = useNavigate();
   const [patients, setPatients] = useState([]);
@@ -166,7 +174,7 @@ export default function Patients({ clinicId, user }) {
           <i className="ti ti-search" style={{ fontSize: 15, color: "#aaa", flexShrink: 0 }} />
           <input
             style={styles.searchInput}
-            placeholder="Search by Name or Phone Number"
+            placeholder="Search by name or mobile number"
             value={search}
             onChange={(event) => { setSearch(event.target.value); setPage(1); }}
           />
@@ -247,7 +255,7 @@ export default function Patients({ clinicId, user }) {
                   </td>
                   <td style={{ ...styles.td, color: "#2f3542", fontWeight: 600 }}>{patient.name}</td>
                   <td style={styles.td}>Dr {patient.doctor_name || user?.doctor_name || "Doctor"}</td>
-                  <td style={styles.td}>{patient.phone}</td>
+                  <td style={styles.td}>{displayPhone(patient.phone)}</td>
                   <td style={styles.td}>{patient.age || "-"}</td>
                   <td style={styles.td}>
                     <span style={String(patient.status || "active").toLowerCase() === "active" ? styles.statusPill : styles.statusInactive}>

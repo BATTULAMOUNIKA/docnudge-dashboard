@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../api";
 
 function localDateString(offsetDays = 0) {
@@ -16,8 +16,20 @@ function normalizeLogs(logRows) {
   });
 }
 
+function displayPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  return value || "-";
+}
+
+const FILTERS = [
+  ["upcoming", "Upcoming"],
+  ["sent", "Sent"],
+  ["failed", "Failed"],
+];
+
 export default function Reminders({ clinicId }) {
-  const [tab, setTab] = useState("upcoming");
+  const [filter, setFilter] = useState("upcoming");
   const [logs, setLogs] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,8 +61,8 @@ export default function Reminders({ clinicId }) {
   async function triggerReminder(type) {
     try {
       await API.post(`/test/${type}`);
-      alert(`${type} reminder triggered. Check WhatsApp.`);
-      loadAll();
+      await loadAll();
+      alert(`${type} reminder triggered.`);
     } catch {
       alert("Error triggering reminder");
     }
@@ -62,130 +74,171 @@ export default function Reminders({ clinicId }) {
   const sent = logs.filter((log) => log.success);
   const failed = logs.filter((log) => !log.success);
   const counts = { upcoming: upcoming.length, sent: sent.length, failed: failed.length };
+  const visible = filter === "upcoming" ? upcoming : filter === "failed" ? failed : sent;
+
+  const stats = useMemo(() => ([
+    { label: "Due next 2 days", value: upcoming.length, icon: "ti-calendar-time", tone: "blue" },
+    { label: "Sent today view", value: sent.length, icon: "ti-checks", tone: "green" },
+    { label: "Failed sends", value: failed.length, icon: "ti-alert-circle", tone: "amber" },
+  ]), [failed.length, sent.length, upcoming.length]);
 
   return (
-    <div style={reminderStyles.page}>
-      <div style={reminderStyles.header}>
+    <div style={styles.page}>
+      <section style={styles.hero}>
         <div>
-          <h1 style={reminderStyles.title}>Reminders</h1>
-          <p style={reminderStyles.sub}>Scheduled WhatsApp reminders for upcoming visits</p>
+          <div style={styles.eyebrow}>Reminder desk</div>
+          <h1 style={styles.heroTitle}>Follow-up reminders</h1>
+          <p style={styles.heroCopy}>The reminder page now matches the main dashboard style while keeping WhatsApp timing and delivery status visible.</p>
         </div>
-        <div style={{ display: "flex", gap: 7 }}>
-          <button style={reminderStyles.btn} onClick={() => triggerReminder("two-days-before")}>2-day</button>
-          <button style={reminderStyles.btn} onClick={() => triggerReminder("day-before")}>Day before</button>
-          <button style={reminderStyles.btn} onClick={() => triggerReminder("morning")}>Morning</button>
+        <div style={styles.heroActions}>
+          <button style={styles.secondaryBtn} onClick={() => triggerReminder("two-days-before")}>2-day run</button>
+          <button style={styles.secondaryBtn} onClick={() => triggerReminder("day-before")}>Day-before run</button>
+          <button style={styles.primaryBtn} onClick={() => triggerReminder("morning")}>Morning run</button>
         </div>
-      </div>
+      </section>
 
-      <div style={reminderStyles.scheduleBar}>
-        <SchedulePill time="10:00 AM" label="2 days before visit" color="#0C447C" bg="#E6F1FB" />
-        <SchedulePill time="6:00 PM" label="Day before visit" color="#633806" bg="#FAEEDA" />
-        <SchedulePill time="8:00 AM" label="Morning of visit" color="#085041" bg="#E1F5EE" />
-        <div style={{ flex: 1 }} />
-        <div style={reminderStyles.githubNote}>
-          <i className="ti ti-brand-github" style={{ fontSize: 13 }} /> Triggered by scheduler
+      <section style={styles.scheduleGrid}>
+        <ScheduleCard time="10:00 AM" label="2 days before visit" />
+        <ScheduleCard time="6:00 PM" label="Day before visit" />
+        <ScheduleCard time="8:00 AM" label="Morning of visit" />
+      </section>
+
+      <section style={styles.statGrid}>
+        {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
+      </section>
+
+      <section style={styles.card}>
+        <div style={styles.cardHeader}>
+          <div>
+            <h2 style={styles.cardTitle}>Reminder views</h2>
+            <p style={styles.cardCopy}>Switch between upcoming reminders, successful sends, and failures without leaving the page.</p>
+          </div>
+          <button style={styles.refreshBtn} onClick={loadAll}><i className="ti ti-refresh" /> Refresh</button>
         </div>
-      </div>
 
-      <div style={reminderStyles.tabs}>
-        {[["upcoming", "Upcoming"], ["sent", "Sent"], ["failed", "Failed"]].map(([key, label]) => (
-          <button key={key} style={{ ...reminderStyles.tab, ...(tab === key ? reminderStyles.tabActive : {}) }} onClick={() => setTab(key)}>
-            {label}
-            {counts[key] > 0 && <span style={reminderStyles.tabBadge}>{counts[key]}</span>}
-          </button>
-        ))}
-      </div>
+        <div style={styles.tabs}>
+          {FILTERS.map(([key, label]) => (
+            <button key={key} style={{ ...styles.tab, ...(filter === key ? styles.tabActive : {}) }} onClick={() => setFilter(key)}>
+              {label}
+              <span>{counts[key] || 0}</span>
+            </button>
+          ))}
+        </div>
 
-      {tab === "upcoming" && renderList(loading, upcoming, "No reminders scheduled in the next 2 days.", (appointment) => (
-        <ReminderRow
-          key={`${appointment.patient_id}-${appointment.next_visit}`}
-          title={appointment.patient_name || "Patient"}
-          subtitle={`${appointment.condition || appointment.followup_type || "-"} | ${appointment.phone || ""}`}
-          rightTop={appointment.next_visit?.slice(0, 10)}
-          rightBottom={appointment.next_visit?.slice(0, 10) === today ? "Today" : "Upcoming"}
-          icon="ti-brand-whatsapp"
-          iconBg="#E6F1FB"
-          iconColor="#185FA5"
-        />
-      ))}
-
-      {tab === "sent" && renderList(loading, sent, "No reminders sent yet.", (log) => (
-        <ReminderRow
-          key={log.id}
-          title={log.patient_name || `Patient #${log.patient_id}`}
-          subtitle={log.reminder_type}
-          rightTop={log.sent_at?.slice(0, 16).replace("T", " ")}
-          icon="ti-check"
-          iconBg="#E1F5EE"
-          iconColor="#1D9E75"
-        />
-      ))}
-
-      {tab === "failed" && renderList(loading, failed, "No failed reminders. All good.", (log) => (
-        <ReminderRow
-          key={log.id}
-          title={log.patient_name || `Patient #${log.patient_id}`}
-          subtitle={log.error || "Send failed"}
-          rightTop={log.sent_at?.slice(0, 16).replace("T", " ")}
-          icon="ti-alert-circle"
-          iconBg="#FAECE7"
-          iconColor="#993C1D"
-        />
-      ))}
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <Th>Patient</Th>
+                <Th>Reason</Th>
+                <Th>Date</Th>
+                <Th>Status</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td style={styles.emptyCell} colSpan="4">Loading reminders...</td></tr>
+              ) : visible.length === 0 ? (
+                <tr><td style={styles.emptyCell} colSpan="4">No entries in this reminder view.</td></tr>
+              ) : filter === "upcoming" ? (
+                visible.map((appointment) => (
+                  <tr key={`${appointment.patient_id}-${appointment.next_visit}`}>
+                    <td style={styles.td}><strong>{appointment.patient_name || "Patient"}</strong></td>
+                    <td style={styles.td}>{appointment.condition || appointment.followup_type || displayPhone(appointment.phone)}</td>
+                    <td style={styles.td}>{appointment.next_visit?.slice(0, 10) || "-"}</td>
+                    <td style={styles.td}><StatusPill status="scheduled" /></td>
+                  </tr>
+                ))
+              ) : (
+                visible.map((log) => (
+                  <tr key={log.id}>
+                    <td style={styles.td}><strong>{log.patient_name || `Patient #${log.patient_id}`}</strong></td>
+                    <td style={styles.td}>{filter === "failed" ? (log.error || "Delivery failed") : (log.reminder_type || "Reminder sent")}</td>
+                    <td style={styles.td}>{log.sent_at?.slice(0, 16).replace("T", " ") || "-"}</td>
+                    <td style={styles.td}><StatusPill status={filter === "failed" ? "failed" : "sent"} /></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
 
-function renderList(loading, items, emptyText, renderer) {
-  if (loading) return <div style={reminderStyles.empty}>Loading...</div>;
-  if (!items.length) return <div style={reminderStyles.empty}>{emptyText}</div>;
-  return <div style={reminderStyles.list}>{items.map(renderer)}</div>;
-}
-
-function ReminderRow({ title, subtitle, rightTop, rightBottom, icon, iconBg, iconColor }) {
+function ScheduleCard({ time, label }) {
   return (
-    <div style={reminderStyles.row}>
-      <div style={{ ...reminderStyles.iconCircle, background: iconBg }}>
-        <i className={`ti ${icon}`} style={{ fontSize: 15, color: iconColor }} />
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={reminderStyles.rowName}>{title}</div>
-        <div style={reminderStyles.rowSub}>{subtitle}</div>
-      </div>
-      <div style={{ textAlign: "right" }}>
-        <div style={{ fontSize: 12, color: "#555" }}>{rightTop || "-"}</div>
-        {rightBottom && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{rightBottom}</div>}
-      </div>
-    </div>
+    <article style={styles.scheduleCard}>
+      <div style={styles.scheduleIcon}><i className="ti ti-clock" /></div>
+      <strong style={styles.scheduleTime}>{time}</strong>
+      <span style={styles.scheduleLabel}>{label}</span>
+    </article>
   );
 }
 
-function SchedulePill({ time, label, color, bg }) {
+function StatCard({ stat }) {
+  const palette = {
+    blue: ["#eaf3ff", "#0c447c"],
+    green: ["#eef9eb", "#2f7a32"],
+    amber: ["#fff4e8", "#b45309"],
+  }[stat.tone];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", background: bg, borderRadius: 8, fontSize: 12 }}>
-      <i className="ti ti-clock" style={{ fontSize: 14, color }} />
-      <strong style={{ color }}>{time}</strong>
-      <span style={{ color }}>{label}</span>
-    </div>
+    <article style={styles.statCard}>
+      <div style={{ ...styles.statIcon, background: palette[0], color: palette[1] }}>
+        <i className={`ti ${stat.icon}`} />
+      </div>
+      <strong style={styles.statValue}>{stat.value}</strong>
+      <span style={styles.statLabel}>{stat.label}</span>
+    </article>
   );
 }
 
-const reminderStyles = {
-  page: { padding: "28px 32px", fontFamily: "'DM Sans',sans-serif", maxWidth: 860 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 },
-  title: { fontSize: 22, fontWeight: 700, color: "#1a1a18", margin: 0 },
-  sub: { fontSize: 13, color: "#aaa", marginTop: 3 },
-  scheduleBar: { display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "0.5px solid rgba(0,0,0,0.09)", borderRadius: 10, padding: "12px 16px", marginBottom: 20, flexWrap: "wrap" },
-  githubNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#aaa" },
-  tabs: { display: "flex", gap: 0, borderBottom: "0.5px solid rgba(0,0,0,0.09)", marginBottom: 16 },
-  tab: { display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, color: "#888", borderBottom: "2px solid transparent", marginBottom: -1 },
-  tabActive: { color: "#1D9E75", fontWeight: 600, borderBottomColor: "#1D9E75" },
-  tabBadge: { fontSize: 11, padding: "2px 7px", borderRadius: 20, fontWeight: 500, background: "#E1F5EE", color: "#085041" },
-  list: { display: "flex", flexDirection: "column", gap: 0, border: "0.5px solid rgba(0,0,0,0.09)", borderRadius: 10, overflow: "hidden" },
-  row: { display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", background: "#fff", borderBottom: "0.5px solid rgba(0,0,0,0.06)" },
-  iconCircle: { width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  rowName: { fontSize: 13, fontWeight: 500, color: "#1a1a18" },
-  rowSub: { fontSize: 12, color: "#aaa", marginTop: 2 },
-  empty: { textAlign: "center", padding: "60px 0", color: "#bbb", fontSize: 14 },
-  btn: { display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 12px", border: "0.5px solid rgba(0,0,0,0.12)", borderRadius: 8, background: "transparent", cursor: "pointer", fontSize: 12, color: "#555" },
+function StatusPill({ status }) {
+  const normalized = String(status).toLowerCase();
+  const palette = normalized === "failed"
+    ? ["#fff0ef", "#b83b2e"]
+    : normalized === "sent"
+      ? ["#eef9eb", "#2f7a32"]
+      : ["#eaf3ff", "#0c447c"];
+  return <span style={{ ...styles.statusPill, background: palette[0], color: palette[1] }}>{normalized}</span>;
+}
+
+function Th({ children }) {
+  return <th style={styles.th}>{children}</th>;
+}
+
+const styles = {
+  page: { padding: "28px 30px 38px", minHeight: "100vh", background: "radial-gradient(circle at top left,#eff8ff 0%,#f7fbff 35%,#f8f6f0 100%)", fontFamily: "'DM Sans', sans-serif", color: "#11243a" },
+  hero: { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", padding: "22px 24px", borderRadius: 28, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", marginBottom: 18 },
+  eyebrow: { fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: "#0d9488", fontWeight: 700, marginBottom: 8 },
+  heroTitle: { margin: 0, fontSize: 28, lineHeight: 1.08, fontWeight: 800 },
+  heroCopy: { margin: "8px 0 0", fontSize: 14, color: "#708092", maxWidth: 720, lineHeight: 1.6 },
+  heroActions: { display: "flex", gap: 10, flexWrap: "wrap" },
+  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", fontWeight: 800, cursor: "pointer" },
+  secondaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "1px solid rgba(12,68,124,0.12)", background: "#fff", color: "#0c447c", fontWeight: 700, cursor: "pointer" },
+  scheduleGrid: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 14, marginBottom: 18 },
+  scheduleCard: { borderRadius: 22, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", padding: 18, display: "grid", gap: 8 },
+  scheduleIcon: { width: 42, height: 42, borderRadius: 15, background: "#eef5fb", color: "#0c447c", display: "grid", placeItems: "center", fontSize: 18 },
+  scheduleTime: { fontSize: 22, color: "#11243a" },
+  scheduleLabel: { fontSize: 13, color: "#516577", fontWeight: 700 },
+  statGrid: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 14, marginBottom: 18 },
+  statCard: { borderRadius: 22, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", padding: 18, display: "grid", gap: 8 },
+  statIcon: { width: 42, height: 42, borderRadius: 15, display: "grid", placeItems: "center", fontSize: 18 },
+  statValue: { fontSize: 28, lineHeight: 1, color: "#11243a" },
+  statLabel: { fontSize: 13, color: "#516577", fontWeight: 700 },
+  card: { background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", borderRadius: 24, padding: 20, boxShadow: "0 18px 40px rgba(15,23,42,0.06)" },
+  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 16 },
+  cardTitle: { margin: 0, fontSize: 18, fontWeight: 800 },
+  cardCopy: { margin: "5px 0 0", color: "#708092", fontSize: 13, lineHeight: 1.6 },
+  refreshBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(12,68,124,0.12)", background: "#fff", color: "#0c447c", fontWeight: 700, cursor: "pointer" },
+  tabs: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
+  tab: { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999, border: "1px solid rgba(12,68,124,0.08)", background: "#f8fbff", color: "#55697b", fontWeight: 700, cursor: "pointer" },
+  tabActive: { background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", boxShadow: "0 12px 24px rgba(12,68,124,0.18)" },
+  tableWrap: { overflow: "auto", borderRadius: 18, border: "1px solid rgba(12,68,124,0.08)" },
+  table: { width: "100%", minWidth: 720, borderCollapse: "collapse", background: "#fff" },
+  th: { padding: "14px 16px", background: "#f7fbff", color: "#708092", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid rgba(12,68,124,0.08)", textAlign: "left" },
+  td: { padding: "14px 16px", borderBottom: "1px solid rgba(12,68,124,0.06)", fontSize: 13, color: "#31475a", verticalAlign: "middle" },
+  emptyCell: { padding: 46, color: "#708092", textAlign: "center" },
+  statusPill: { padding: "6px 11px", borderRadius: 999, textTransform: "capitalize", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" },
 };

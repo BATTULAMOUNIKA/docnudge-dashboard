@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   completeAppointment,
   createAppointment,
@@ -40,6 +40,7 @@ function timeLabel(value) {
 
 export default function Appointments({ clinicId, user }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("today");
@@ -51,6 +52,12 @@ export default function Appointments({ clinicId, user }) {
   useEffect(() => {
     load();
   }, [clinicId]);
+
+  useEffect(() => {
+    if (!location.state?.flash) return;
+    flash(location.state.flash);
+    window.history.replaceState({}, document.title);
+  }, [location.state]);
 
   async function load() {
     if (!clinicId) {
@@ -89,6 +96,20 @@ export default function Appointments({ clinicId, user }) {
     });
     setAppointments((current) => current.map((item) => (item.id === appointment.id ? response.data.appointment : item)));
     flash(`${response.data?.patient?.name || appointment.patient_name} moved into records.`);
+  }
+
+  async function openPatient(appointment) {
+    const response = await completeAppointment(appointment.id, {
+      condition: appointment.service_type || "Consultation",
+      notes: appointment.notes || "",
+    });
+    setAppointments((current) => current.map((item) => (item.id === appointment.id ? response.data.appointment : item)));
+    const patientId = response.data?.patient?.id;
+    if (patientId) {
+      navigate(`${routePrefix()}/patients/${patientId}`);
+      return;
+    }
+    flash(`${appointment.patient_name} moved into records.`);
   }
 
   async function removeAppointment(appointment) {
@@ -178,7 +199,7 @@ export default function Appointments({ clinicId, user }) {
         <div style={styles.cardHeader}>
           <div>
             <h2 style={styles.cardTitle}>Appointment views</h2>
-            <p style={styles.cardCopy}>The page opens in Today view by default so the doctor sees only what matters first.</p>
+          <p style={styles.cardCopy}>The page opens in Today view by default so the doctor sees only what matters first.</p>
           </div>
           <div style={styles.toolbar}>
             {message && <span style={styles.toast}>{message}</span>}
@@ -219,6 +240,7 @@ export default function Appointments({ clinicId, user }) {
                     key={appointment.id}
                     appointment={appointment}
                     index={index}
+                    onOpen={() => openPatient(appointment)}
                     onDone={() => markDone(appointment)}
                     onReschedule={() => setRescheduling(appointment)}
                     onDelete={() => removeAppointment(appointment)}
@@ -233,7 +255,7 @@ export default function Appointments({ clinicId, user }) {
   );
 }
 
-function AppointmentRow({ appointment, index, onDone, onReschedule, onDelete }) {
+function AppointmentRow({ appointment, index, onOpen, onDone, onReschedule, onDelete }) {
   const isCompleted = appointment.status === "completed";
   return (
     <tr>
@@ -250,6 +272,7 @@ function AppointmentRow({ appointment, index, onDone, onReschedule, onDelete }) 
       <td style={styles.td}><StatusPill status={appointment.status || "booked"} /></td>
       <td style={{ ...styles.td, textAlign: "right" }}>
         <div style={styles.actions}>
+          {!isCompleted && <button style={styles.openBtn} onClick={onOpen}><i className="ti ti-folder-open" /> Open patient</button>}
           {!isCompleted && <button style={styles.doneBtn} onClick={onDone}><i className="ti ti-check" /> Done</button>}
           <button style={styles.iconBtn} onClick={onReschedule}><i className="ti ti-calendar-plus" /></button>
           <button style={{ ...styles.iconBtn, ...styles.dangerBtn }} onClick={onDelete}><i className="ti ti-trash" /></button>
@@ -449,6 +472,7 @@ const styles = {
   patientCell: { display: "flex", flexDirection: "column", gap: 4 },
   statusPill: { padding: "6px 11px", borderRadius: 999, textTransform: "capitalize", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" },
   actions: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  openBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 12, border: "1px solid rgba(12,68,124,0.12)", background: "#fff", color: "#0c447c", fontWeight: 800, cursor: "pointer" },
   doneBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#0d9488,#16a34a)", color: "#fff", fontWeight: 800, cursor: "pointer" },
   iconBtn: { width: 34, height: 34, borderRadius: 12, border: "1px solid rgba(12,68,124,0.1)", background: "#fff", color: "#55697b", display: "grid", placeItems: "center", cursor: "pointer" },
   dangerBtn: { background: "#fff3f2", color: "#b83b2e", borderColor: "rgba(184,59,46,0.16)" },

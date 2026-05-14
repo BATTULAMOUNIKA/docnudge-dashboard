@@ -24,16 +24,6 @@ function todayLabel() {
   });
 }
 
-function initials(value = "") {
-  return String(value)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase() || "DN";
-}
-
 export default function Dashboard({ clinicId: initialClinicId, user }) {
   const navigate = useNavigate();
   const [clinic, setClinic] = useState(null);
@@ -77,25 +67,22 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
 
   const doctorName = user?.doctor_name || clinic?.doctor_name || "Doctor";
   const designation = user?.designation || clinic?.designation || "General Physician";
-
-  const reminderDisabled = patients.filter((patient) => patient.reminder_enabled === false).length;
   const followupEnabled = patients.filter((patient) => patient.followup_enabled !== false).length;
   const failedReminders = logs
     .map((row) => (Array.isArray(row) ? row : [row, null]))
     .filter(([log]) => !log?.success);
-  const failedPatients = failedReminders.slice(0, 4);
-  const upcomingPatients = patients
-    .filter((patient) => patient.followup_enabled !== false)
-    .slice(0, 4);
+  const recentPatients = patients
+    .filter((patient) => patient.last_visit_at || patient.created_at)
+    .slice(0, 5);
 
   const stats = useMemo(
     () => [
-      { label: "Total patients", value: patients.length, hint: "Registered records", icon: "ti-users", tone: "blue" },
-      { label: "Today's appointments", value: appointments.length, hint: "Live doctor day", icon: "ti-calendar-event", tone: "teal" },
-      { label: "Follow-up enabled", value: followupEnabled, hint: "Care plans running", icon: "ti-heart-rate-monitor", tone: "green" },
-      { label: "Needs recovery", value: failedReminders.length, hint: "Failed reminders", icon: "ti-alert-triangle", tone: "amber" },
+      { label: "Total patients", value: patients.length, hint: "Visible patient records", icon: "ti-users", tone: "blue" },
+      { label: "Today's appointments", value: appointments.length, hint: "Open consultation desk", icon: "ti-calendar-event", tone: "teal" },
+      { label: "Follow-up enabled", value: followupEnabled, hint: "Patients in care flow", icon: "ti-heart-rate-monitor", tone: "green" },
+      { label: "Needs recovery", value: failedReminders.length, hint: "Reminder failures", icon: "ti-alert-triangle", tone: "amber" },
     ],
-    [appointments.length, failedReminders.length, followupEnabled, patients.length]
+    [appointments.length, failedReminders.length, followupEnabled, patients.length],
   );
 
   return (
@@ -105,15 +92,15 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
           <div style={styles.eyebrow}>Doctor workspace</div>
           <h1 style={styles.heroTitle}>Good day, Dr. {doctorName}</h1>
           <p style={styles.heroCopy}>
-            {clinic?.name || "DocNudge Clinic"} · {designation} · {todayLabel()}
+            {clinic?.name || "Clinic"} · {designation} · {todayLabel()}
           </p>
         </div>
         <div style={styles.heroActions}>
           <button style={styles.primaryBtn} onClick={() => navigate(`${routePrefix()}/appointments`)}>
             <i className="ti ti-calendar-event" /> Open appointments
           </button>
-          <button style={styles.secondaryBtn} onClick={() => navigate(`${routePrefix()}/settings?tab=profile`)}>
-            <i className="ti ti-user-circle" /> My profile
+          <button style={styles.secondaryBtn} onClick={() => navigate(`${routePrefix()}/patients`)}>
+            <i className="ti ti-users" /> Open patients
           </button>
         </div>
       </section>
@@ -125,7 +112,7 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
       </section>
 
       <section style={styles.grid}>
-        <article style={{ ...styles.card, gridColumn: "span 2" }}>
+        <article style={styles.card}>
           <div style={styles.cardHeader}>
             <div>
               <h2 style={styles.cardTitle}>Today's appointments</h2>
@@ -141,7 +128,7 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
             <EmptyCard
               icon="ti-calendar-off"
               title="No appointments booked for today"
-              copy="Use the appointments desk to add a walk-in patient or create a booking."
+              copy="Use the appointments desk to add a patient and start the consultation from there."
               actionLabel="Open appointments"
               onAction={() => navigate(`${routePrefix()}/appointments`)}
             />
@@ -164,90 +151,30 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
         <article style={styles.card}>
           <div style={styles.cardHeader}>
             <div>
-              <h2 style={styles.cardTitle}>Recovery watchlist</h2>
-              <p style={styles.cardCopy}>Patients whose reminders failed and may need manual attention.</p>
+              <h2 style={styles.cardTitle}>Recent patient movement</h2>
+              <p style={styles.cardCopy}>Patients appear here after the doctor opens or completes their consultation.</p>
             </div>
-            <button style={styles.linkBtn} onClick={() => navigate(`${routePrefix()}/recovery`)}>
-              Open recovery
+            <button style={styles.linkBtn} onClick={() => navigate(`${routePrefix()}/patients`)}>
+              Open records
             </button>
           </div>
-          {failedPatients.length === 0 ? (
-            <div style={styles.emptyCompact}>No failed reminders right now.</div>
-          ) : (
-            <div style={styles.stack}>
-              {failedPatients.map(([log, patient]) => (
-                <div key={log?.id} style={styles.personRow}>
-                  <div style={styles.avatar}>{initials(patient?.name)}</div>
-                  <div style={styles.personBody}>
-                    <strong>{patient?.name || "Patient"}</strong>
-                    <span>{log?.reminder_type?.replaceAll("_", " ") || "Reminder"} failed</span>
-                  </div>
-                  <span style={styles.alertBadge}>Needs call</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </article>
-
-        <article style={styles.card}>
-          <div style={styles.cardHeader}>
-            <div>
-              <h2 style={styles.cardTitle}>Care preferences</h2>
-              <p style={styles.cardCopy}>Reminder controls and follow-up readiness for your clinic.</p>
-            </div>
-          </div>
-          <div style={styles.preferenceGrid}>
-            <PreferenceTile label="Reminders active" value={patients.length - reminderDisabled} tone="teal" />
-            <PreferenceTile label="Reminders paused" value={reminderDisabled} tone="amber" />
-          </div>
-          <div style={styles.preferenceNote}>
-            Patients with reminders paused or follow-up disabled stay out of the automated reminder flow.
-          </div>
-        </article>
-
-        <article style={{ ...styles.card, gridColumn: "span 2" }}>
-          <div style={styles.cardHeader}>
-            <div>
-              <h2 style={styles.cardTitle}>Care timeline</h2>
-              <p style={styles.cardCopy}>A quick doctor-side view of patients still in active follow-up.</p>
-            </div>
-          </div>
-          {upcomingPatients.length === 0 ? (
-            <div style={styles.emptyCompact}>No active follow-up patients yet.</div>
+          {loading ? (
+            <div style={styles.emptyCompact}>Loading patient records...</div>
+          ) : recentPatients.length === 0 ? (
+            <div style={styles.emptyCompact}>No patient records available yet.</div>
           ) : (
             <div style={styles.timeline}>
-              {upcomingPatients.map((patient) => (
-                <div key={patient.id} style={styles.timelineRow}>
+              {recentPatients.map((patient) => (
+                <button key={patient.id} style={styles.timelineButton} onClick={() => navigate(`${routePrefix()}/patients/${patient.id}`)}>
                   <div style={styles.timelineDot} />
                   <div style={styles.timelineCard}>
                     <strong>{patient.name}</strong>
-                    <span>{patient.followup_type || patient.condition || "Follow-up care"} · {patient.mrn || `DN${patient.id}`}</span>
+                    <span>{patient.condition || patient.followup_type || "Consultation"} · {patient.last_visit_at?.slice(0, 10) || patient.created_at?.slice(0, 10) || "New record"}</span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
-        </article>
-
-        <article style={styles.card}>
-          <div style={styles.cardHeader}>
-            <div>
-              <h2 style={styles.cardTitle}>Doctor profile</h2>
-              <p style={styles.cardCopy}>Keep your name, clinic identity, and specialty accurate everywhere.</p>
-            </div>
-          </div>
-          <div style={styles.profileBlock}>
-            <div style={styles.profileTop}>
-              <div style={styles.profileAvatar}>{initials(doctorName)}</div>
-              <div>
-                <strong style={styles.profileName}>Dr. {doctorName}</strong>
-                <div style={styles.profileSub}>{clinic?.name || "Clinic"} · {designation}</div>
-              </div>
-            </div>
-            <button style={styles.secondaryBtn} onClick={() => navigate(`${routePrefix()}/settings?tab=profile`)}>
-              <i className="ti ti-settings" /> Edit profile and password
-            </button>
-          </div>
         </article>
       </section>
     </div>
@@ -286,19 +213,6 @@ function StatusPill({ status }) {
   return <span style={{ ...styles.statusPill, background: palette[0], color: palette[1] }}>{normalized}</span>;
 }
 
-function PreferenceTile({ label, value, tone }) {
-  const palette = {
-    teal: ["#e5fbf7", "#0d9488"],
-    amber: ["#fff4e8", "#b45309"],
-  }[tone];
-  return (
-    <div style={{ ...styles.preferenceTile, background: palette[0] }}>
-      <strong style={{ color: palette[1] }}>{value}</strong>
-      <span>{label}</span>
-    </div>
-  );
-}
-
 function EmptyCard({ icon, title, copy, actionLabel, onAction }) {
   return (
     <div style={styles.emptyRich}>
@@ -325,7 +239,7 @@ const styles = {
   statValue: { display: "block", fontSize: 28, lineHeight: 1, fontWeight: 800, color: "#11243a", marginBottom: 6 },
   statLabel: { fontSize: 13, fontWeight: 700, color: "#3a5068" },
   statHint: { fontSize: 12, color: "#708092", marginTop: 3 },
-  grid: { display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,0.8fr) minmax(280px,0.7fr)", gap: 16 },
+  grid: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 },
   card: { background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", borderRadius: 24, padding: 20, boxShadow: "0 18px 40px rgba(15,23,42,0.06)", backdropFilter: "blur(10px)" },
   cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 },
   cardTitle: { margin: 0, fontSize: 18, fontWeight: 800, color: "#11243a" },
@@ -340,21 +254,8 @@ const styles = {
   emptyCompact: { padding: "18px 0 8px", color: "#708092", fontSize: 13 },
   emptyRich: { minHeight: 240, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", gap: 10, color: "#708092" },
   emptyIcon: { width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "#eef5fb", color: "#0c447c", fontSize: 24 },
-  stack: { display: "flex", flexDirection: "column", gap: 10 },
-  personRow: { display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderTop: "1px solid rgba(12,68,124,0.06)" },
-  avatar: { width: 40, height: 40, borderRadius: 14, background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, flexShrink: 0 },
-  personBody: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 },
-  alertBadge: { padding: "6px 10px", borderRadius: 999, background: "#fff4e8", color: "#b45309", fontWeight: 800, fontSize: 11, whiteSpace: "nowrap" },
-  preferenceGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 },
-  preferenceTile: { borderRadius: 18, padding: 16, display: "grid", gap: 6 },
-  preferenceNote: { fontSize: 12, color: "#708092", lineHeight: 1.7 },
   timeline: { display: "flex", flexDirection: "column", gap: 12 },
-  timelineRow: { display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 12 },
+  timelineButton: { display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 12, padding: 0, border: "none", background: "transparent", cursor: "pointer", textAlign: "left" },
   timelineDot: { width: 12, height: 12, borderRadius: "50%", background: "#0d9488", boxShadow: "0 0 0 6px rgba(13,148,136,0.12)" },
   timelineCard: { display: "flex", flexDirection: "column", gap: 4, padding: "14px 16px", borderRadius: 18, background: "#fbfdff", border: "1px solid rgba(12,68,124,0.08)" },
-  profileBlock: { display: "grid", gap: 14 },
-  profileTop: { display: "flex", alignItems: "center", gap: 12 },
-  profileAvatar: { width: 52, height: 52, borderRadius: 18, background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 17 },
-  profileName: { display: "block", fontSize: 16, color: "#11243a" },
-  profileSub: { marginTop: 4, fontSize: 13, color: "#708092" },
 };

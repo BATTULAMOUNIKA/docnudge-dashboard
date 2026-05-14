@@ -158,14 +158,14 @@ export default function OPSheet({ user }) {
             <i className="ti ti-arrow-left" style={{ fontSize: 14 }} /> Back
           </button>
           <div>
-            <div style={styles.breadcrumb}>Patients / {patient.name} / OP sheet</div>
+            <div style={styles.breadcrumb}>Patients / {patient.name} / Record</div>
             <div style={styles.topTitle}>{clinicName}</div>
           </div>
         </div>
         <div style={styles.topActions}>
           {message && <span style={styles.message}>{message}</span>}
           <button style={styles.previewBtn} onClick={handlePrintSheet}>
-            <i className="ti ti-printer" style={{ fontSize: 14 }} /> Print sheet
+            <i className="ti ti-printer" style={{ fontSize: 14 }} /> Print record
           </button>
           <button style={styles.whatsAppBtn} onClick={handleSendWhatsApp} disabled={sending}>
             <i className="ti ti-brand-whatsapp" style={{ fontSize: 15 }} />
@@ -176,8 +176,8 @@ export default function OPSheet({ user }) {
 
       <div style={styles.hero}>
         <div style={styles.heroPrimary}>
-          <div style={styles.heroBadge}>Live OPD workspace</div>
-          <div style={styles.heroHeading}>A cleaner OP sheet view for consultation, prescription, and follow-up.</div>
+          <div style={styles.heroBadge}>Patient workspace</div>
+          <div style={styles.heroHeading}>Patient consultation, prescription, and follow-up in one place.</div>
           <div style={styles.heroCopy}>
             Patient details, clinical context, and the printable sheet stay in one place so front desk and doctor can work from the same screen.
           </div>
@@ -353,7 +353,7 @@ export default function OPSheet({ user }) {
               <EmptyState
                 icon="ti-test-pipe"
                 title="No lab results yet"
-                description="Add routine lab values or reports so the OP sheet can show recent investigations."
+                description="Add routine lab values or reports so the patient record can show recent investigations."
                 buttonLabel="Add lab result"
                 onClick={() => setShowLab(true)}
               />
@@ -424,7 +424,7 @@ export default function OPSheet({ user }) {
               <div>
                 <div style={styles.previewTitle}>
                   <span style={styles.liveDot} />
-                  Live OP Sheet
+                  Record preview
                 </div>
                 <div style={styles.previewSub}>Updates from patient, visit, prescription, and lab records.</div>
               </div>

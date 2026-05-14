@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { sendRecoveryWhatsApp } from "../api";
 
@@ -21,9 +21,16 @@ function todayString() {
   return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
 }
 
+const FILTERS = [
+  ["overdue", "Overdue patients"],
+  ["missed", "Missed visits"],
+  ["failed", "Failed WhatsApp"],
+  ["optout", "Opted out"],
+];
+
 export default function Recovery({ clinicId }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("overdue");
+  const [filter, setFilter] = useState("overdue");
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -61,22 +68,28 @@ export default function Recovery({ clinicId }) {
   const missed = appointments.filter((appointment) => appointment.status === "missed");
   const failedWA = logs.filter((log) => !log.success);
   const optedOut = patients.filter((patient) => patient.opted_out);
-
-  const weeklyMissed = missed.length;
-  const weeklyNew = patients.filter((patient) => patient.created_at?.slice(0, 10) >= today).length;
-  const weeklyReturns = appointments.filter((appointment) => appointment.status === "completed").length;
   const counts = { overdue: overdue.length, missed: missed.length, failed: failedWA.length, optout: optedOut.length };
+  const visible = filter === "overdue" ? overdue : filter === "missed" ? missed : filter === "failed" ? failedWA : optedOut;
+
+  const weeklyStats = useMemo(() => ({
+    pipeline: appointments.length,
+    newPatients: patients.filter((patient) => patient.created_at?.slice(0, 10) >= today).length,
+    returned: appointments.filter((appointment) => appointment.status === "completed").length,
+    missed: missed.length,
+  }), [appointments, missed.length, patients, today]);
 
   function generateReport() {
     const summary = overdue.length
       ? `${overdue.length} patients are overdue and need recovery outreach. Failed WhatsApp sends: ${failedWA.length}.`
-      : `Follow-up health looks stable this week with ${weeklyReturns} completed returns.`;
+      : `Follow-up health looks stable this week with ${weeklyStats.returned} completed returns.`;
     const highlights = [
-      `${weeklyNew} new patients added this week`,
-      `${weeklyReturns} follow-ups completed`,
-      `${weeklyMissed} missed visits need attention`,
+      `${weeklyStats.newPatients} new patients added today`,
+      `${weeklyStats.returned} follow-ups completed`,
+      `${weeklyStats.missed} missed visits need attention`,
     ];
-    const action = overdue.length ? "Focus on overdue patients first and retry failed WhatsApp sends." : "Keep monitoring reminder delivery and book next visits before discharge.";
+    const action = overdue.length
+      ? "Focus on overdue patients first and retry failed WhatsApp sends."
+      : "Keep monitoring reminder delivery and book the next visit before discharge.";
     setReport({ summary, highlights, action });
   }
 
@@ -90,165 +103,187 @@ export default function Recovery({ clinicId }) {
   }
 
   return (
-    <div style={recoveryStyles.page}>
-      <div style={recoveryStyles.header}>
+    <div style={styles.page}>
+      <section style={styles.hero}>
         <div>
-          <h1 style={recoveryStyles.title}>Recovery</h1>
-          <p style={recoveryStyles.sub}>Overdue patients, missed visits and failed sends</p>
+          <div style={styles.eyebrow}>Recovery desk</div>
+          <h1 style={styles.heroTitle}>Recovery and follow-up risks</h1>
+          <p style={styles.heroCopy}>Overdue follow-ups, missed visits, and delivery problems are now presented in the same visual system as the main doctor dashboard.</p>
         </div>
-        <button style={recoveryStyles.btnPrimary} onClick={loadAll}>
-          <i className="ti ti-refresh" style={{ fontSize: 13 }} /> Refresh
-        </button>
-      </div>
-
-      {overdue.length > 0 && (
-        <div style={recoveryStyles.alertBar}>
-          <i className="ti ti-alert-triangle" style={{ fontSize: 16, color: "#712B13" }} />
-          <span><strong>{overdue.length} patients</strong> are overdue for a visit. Send a recovery message to bring them back.</span>
+        <div style={styles.heroActions}>
+          <button style={styles.secondaryBtn} onClick={generateReport}><i className="ti ti-sparkles" /> Generate report</button>
+          <button style={styles.primaryBtn} onClick={loadAll}><i className="ti ti-refresh" /> Refresh</button>
         </div>
-      )}
+      </section>
 
-      <div style={recoveryStyles.reportCard}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={recoveryStyles.aiBadge}><i className="ti ti-sparkles" style={{ fontSize: 13 }} /> AI</div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a18" }}>Weekly clinic report</div>
-              <div style={{ fontSize: 12, color: "#aaa" }}>Summary generated from live clinic data</div>
-            </div>
+      <section style={styles.statGrid}>
+        <StatCard label="Pipeline" value={weeklyStats.pipeline} icon="ti-calendar-event" tone="blue" />
+        <StatCard label="New patients" value={weeklyStats.newPatients} icon="ti-user-plus" tone="green" />
+        <StatCard label="Returns completed" value={weeklyStats.returned} icon="ti-circle-check" tone="teal" />
+        <StatCard label="Missed visits" value={weeklyStats.missed} icon="ti-alert-triangle" tone="amber" />
+      </section>
+
+      <section style={styles.card}>
+        <div style={styles.cardHeader}>
+          <div>
+            <h2 style={styles.cardTitle}>Clinic recovery summary</h2>
+            <p style={styles.cardCopy}>Use this block to spot who needs manual attention before the day closes.</p>
           </div>
-          <button style={recoveryStyles.btnPrimary} onClick={generateReport}>
-            <i className="ti ti-sparkles" style={{ fontSize: 13 }} /> Generate report
-          </button>
         </div>
 
-        <div style={recoveryStyles.weeklyGrid}>
-          <WeeklyStat label="Visits in follow-up pipeline" value={appointments.length} />
-          <WeeklyStat label="New patients" value={weeklyNew} />
-          <WeeklyStat label="Returned patients" value={weeklyReturns} />
-          <WeeklyStat label="Missed visits" value={weeklyMissed} warn={weeklyMissed > 0} />
-        </div>
-
-        {report && (
-          <div style={recoveryStyles.reportOutput}>
-            <div style={{ fontSize: 13, color: "#1a1a18", lineHeight: 1.6, marginBottom: 10 }}>{report.summary}</div>
-            <ul style={{ paddingLeft: 18, margin: "0 0 10px" }}>
-              {(report.highlights || []).map((item, index) => <li key={index} style={{ fontSize: 13, color: "#555", marginBottom: 4 }}>{item}</li>)}
-            </ul>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#E1F5EE", borderRadius: 7, padding: "9px 12px" }}>
-              <i className="ti ti-bulb" style={{ fontSize: 14, color: "#1D9E75", marginTop: 1 }} />
-              <span style={{ fontSize: 13, color: "#085041" }}><strong>Recommended:</strong> {report.action}</span>
+        {report ? (
+          <div style={styles.reportBox}>
+            <p style={styles.reportSummary}>{report.summary}</p>
+            <div style={styles.reportHighlights}>
+              {report.highlights.map((item) => <span key={item} style={styles.highlight}>{item}</span>)}
             </div>
+            <div style={styles.recommendation}><strong>Recommended:</strong> {report.action}</div>
           </div>
+        ) : (
+          <div style={styles.emptyCompact}>Generate the recovery report to see the latest follow-up summary.</div>
         )}
-      </div>
+      </section>
 
-      <div style={recoveryStyles.tabs}>
-        {[["overdue", "Overdue patients"], ["missed", "Missed visits"], ["failed", "Failed WhatsApp"], ["optout", "Opted out"]].map(([key, label]) => (
-          <button key={key} style={{ ...recoveryStyles.tab, ...(tab === key ? recoveryStyles.tabActive : {}) }} onClick={() => setTab(key)}>
-            {label}
-            {counts[key] > 0 && <span style={recoveryStyles.tabBadge}>{counts[key]}</span>}
-          </button>
-        ))}
-      </div>
+      <section style={styles.card}>
+        <div style={styles.cardHeader}>
+          <div>
+            <h2 style={styles.cardTitle}>Recovery views</h2>
+            <p style={styles.cardCopy}>Open a patient record or send a recovery message directly from the overdue view.</p>
+          </div>
+        </div>
 
-      {tab === "overdue" && renderRecoveryList(loading, overdue, "No overdue patients. Great retention!", (appointment) => (
-        <RecoveryRow
-          key={`${appointment.patient_id}-${appointment.next_visit}`}
-          title={appointment.patient_name}
-          subtitle={`${appointment.condition || appointment.followup_type || "-"} | ${appointment.phone || ""}`}
-          rightTop={`${Math.max(1, Math.floor((new Date(today) - new Date(appointment.next_visit?.slice(0, 10) || today)) / 86400000))} days overdue`}
-          rightBottom={`Was due: ${appointment.next_visit?.slice(0, 10) || "-"}`}
-          onClick={() => navigate(appPath(`/patients/${appointment.patient_id}`))}
-          actionLabel="Send message"
-          onAction={() => sendRecovery(appointment.patient_id, appointment.patient_name)}
-        />
-      ))}
+        <div style={styles.tabs}>
+          {FILTERS.map(([key, label]) => (
+            <button key={key} style={{ ...styles.tab, ...(filter === key ? styles.tabActive : {}) }} onClick={() => setFilter(key)}>
+              {label}
+              <span>{counts[key] || 0}</span>
+            </button>
+          ))}
+        </div>
 
-      {tab === "missed" && renderRecoveryList(loading, missed, "No missed visits recorded.", (appointment) => (
-        <RecoveryRow
-          key={`${appointment.patient_id}-${appointment.next_visit}-missed`}
-          title={appointment.patient_name}
-          subtitle={appointment.condition || appointment.followup_type || "Missed visit"}
-          rightTop={appointment.next_visit?.slice(0, 10) || "-"}
-          onClick={() => navigate(appPath(`/patients/${appointment.patient_id}`))}
-        />
-      ))}
-
-      {tab === "failed" && renderRecoveryList(loading, failedWA, "No failed WhatsApp sends. All messages delivered.", (log) => (
-        <RecoveryRow
-          key={log.id}
-          title={log.patient_name || `Patient #${log.patient_id}`}
-          subtitle={log.error || "Unknown error"}
-          rightTop={log.sent_at?.slice(0, 10) || "-"}
-        />
-      ))}
-
-      {tab === "optout" && renderRecoveryList(loading, optedOut, "No patients have opted out.", (patient) => (
-        <RecoveryRow
-          key={patient.id}
-          title={patient.name}
-          subtitle={`${patient.phone} | ${patient.condition || "-"}`}
-          rightTop="Opted out"
-        />
-      ))}
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <Th>Patient</Th>
+                <Th>Context</Th>
+                <Th>Date</Th>
+                <Th align="right">Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td style={styles.emptyCell} colSpan="4">Loading recovery data...</td></tr>
+              ) : visible.length === 0 ? (
+                <tr><td style={styles.emptyCell} colSpan="4">No entries in this recovery view.</td></tr>
+              ) : filter === "overdue" ? (
+                visible.map((appointment) => (
+                  <tr key={`${appointment.patient_id}-${appointment.next_visit}`}>
+                    <td style={styles.td}><strong>{appointment.patient_name || "Patient"}</strong></td>
+                    <td style={styles.td}>{appointment.condition || appointment.followup_type || "Follow-up due"}</td>
+                    <td style={styles.td}>{appointment.next_visit?.slice(0, 10) || "-"}</td>
+                    <td style={{ ...styles.td, textAlign: "right" }}>
+                      <div style={styles.actions}>
+                        <button style={styles.openBtn} onClick={() => navigate(appPath(`/patients/${appointment.patient_id}`))}>Open patient</button>
+                        <button style={styles.recoverBtn} onClick={() => sendRecovery(appointment.patient_id, appointment.patient_name)}>Send message</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : filter === "missed" ? (
+                visible.map((appointment) => (
+                  <tr key={`${appointment.patient_id}-${appointment.next_visit}-missed`}>
+                    <td style={styles.td}><strong>{appointment.patient_name || "Patient"}</strong></td>
+                    <td style={styles.td}>{appointment.condition || appointment.followup_type || "Missed visit"}</td>
+                    <td style={styles.td}>{appointment.next_visit?.slice(0, 10) || "-"}</td>
+                    <td style={{ ...styles.td, textAlign: "right" }}>
+                      <button style={styles.openBtn} onClick={() => navigate(appPath(`/patients/${appointment.patient_id}`))}>Open patient</button>
+                    </td>
+                  </tr>
+                ))
+              ) : filter === "failed" ? (
+                visible.map((log) => (
+                  <tr key={log.id}>
+                    <td style={styles.td}><strong>{log.patient_name || `Patient #${log.patient_id}`}</strong></td>
+                    <td style={styles.td}>{log.error || "Delivery failed"}</td>
+                    <td style={styles.td}>{log.sent_at?.slice(0, 10) || "-"}</td>
+                    <td style={{ ...styles.td, textAlign: "right" }}><span style={styles.metaPill}>Retry needed</span></td>
+                  </tr>
+                ))
+              ) : (
+                visible.map((patient) => (
+                  <tr key={patient.id}>
+                    <td style={styles.td}><strong>{patient.name}</strong></td>
+                    <td style={styles.td}>{patient.condition || "Opted out from reminders"}</td>
+                    <td style={styles.td}>{patient.last_visit_at?.slice(0, 10) || patient.created_at?.slice(0, 10) || "-"}</td>
+                    <td style={{ ...styles.td, textAlign: "right" }}><span style={styles.metaPill}>Opted out</span></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
 
-function renderRecoveryList(loading, items, emptyText, renderer) {
-  if (loading) return <div style={recoveryStyles.empty}>Loading...</div>;
-  if (!items.length) return <div style={recoveryStyles.goodState}>{emptyText}</div>;
-  return <div style={recoveryStyles.list}>{items.map(renderer)}</div>;
-}
-
-function RecoveryRow({ title, subtitle, rightTop, rightBottom, onClick, actionLabel, onAction }) {
+function StatCard({ label, value, icon, tone }) {
+  const palette = {
+    blue: ["#eaf3ff", "#0c447c"],
+    teal: ["#e5fbf7", "#0d9488"],
+    green: ["#eef9eb", "#2f7a32"],
+    amber: ["#fff4e8", "#b45309"],
+  }[tone];
   return (
-    <div style={recoveryStyles.row}>
-      <div style={recoveryStyles.avatar}>{title?.slice(0, 2).toUpperCase() || "PT"}</div>
-      <div style={{ flex: 1 }}>
-        <div style={recoveryStyles.rowName} onClick={onClick}>{title}</div>
-        <div style={recoveryStyles.rowSub}>{subtitle}</div>
+    <article style={styles.statCard}>
+      <div style={{ ...styles.statIcon, background: palette[0], color: palette[1] }}>
+        <i className={`ti ${icon}`} />
       </div>
-      <div style={{ textAlign: "right", marginRight: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: "#993C1D" }}>{rightTop}</div>
-        {rightBottom && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{rightBottom}</div>}
-      </div>
-      {actionLabel && <button style={recoveryStyles.recoverBtn} onClick={onAction}>{actionLabel}</button>}
-    </div>
+      <strong style={styles.statValue}>{value}</strong>
+      <span style={styles.statLabel}>{label}</span>
+    </article>
   );
 }
 
-function WeeklyStat({ label, value, warn }) {
-  return (
-    <div style={{ textAlign: "center", padding: "10px 0" }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: warn ? "#993C1D" : "#1a1a18" }}>{value}</div>
-      <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{label}</div>
-    </div>
-  );
+function Th({ children, align = "left" }) {
+  return <th style={{ ...styles.th, textAlign: align }}>{children}</th>;
 }
 
-const recoveryStyles = {
-  page: { padding: "28px 32px", fontFamily: "'DM Sans',sans-serif", maxWidth: 900 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
-  title: { fontSize: 22, fontWeight: 700, color: "#1a1a18", margin: 0 },
-  sub: { fontSize: 13, color: "#aaa", marginTop: 3 },
-  alertBar: { display: "flex", alignItems: "center", gap: 10, background: "#FAECE7", border: "0.5px solid #F5C4B3", borderRadius: 9, padding: "11px 16px", marginBottom: 14, fontSize: 13, color: "#712B13" },
-  reportCard: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.09)", borderRadius: 10, padding: "16px 18px", marginBottom: 18 },
-  aiBadge: { display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 9px", borderRadius: 20, background: "#E1F5EE", color: "#085041", fontSize: 12, fontWeight: 600, border: "0.5px solid #9FE1CB" },
-  weeklyGrid: { display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 0, borderTop: "0.5px solid rgba(0,0,0,0.08)", borderLeft: "0.5px solid rgba(0,0,0,0.08)", marginTop: 14, borderRadius: 8, overflow: "hidden" },
-  reportOutput: { marginTop: 14, padding: "12px 14px", background: "#f8f7f4", borderRadius: 8, border: "0.5px solid rgba(0,0,0,0.08)" },
-  tabs: { display: "flex", gap: 0, borderBottom: "0.5px solid rgba(0,0,0,0.09)", marginBottom: 16, flexWrap: "wrap" },
-  tab: { display: "flex", alignItems: "center", gap: 7, padding: "9px 14px", border: "none", background: "transparent", cursor: "pointer", fontSize: 13, color: "#888", borderBottom: "2px solid transparent", marginBottom: -1 },
-  tabActive: { color: "#1D9E75", fontWeight: 600, borderBottomColor: "#1D9E75" },
-  tabBadge: { fontSize: 11, padding: "2px 7px", borderRadius: 20, fontWeight: 500, background: "#FAECE7", color: "#712B13" },
-  list: { border: "0.5px solid rgba(0,0,0,0.09)", borderRadius: 10, overflow: "hidden" },
-  row: { display: "flex", alignItems: "center", gap: 11, padding: "12px 16px", background: "#fff", borderBottom: "0.5px solid rgba(0,0,0,0.06)" },
-  avatar: { width: 32, height: 32, borderRadius: "50%", background: "#E1F5EE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: "#0F6E56", flexShrink: 0 },
-  rowName: { fontSize: 13, fontWeight: 500, color: "#1a1a18", cursor: "pointer" },
-  rowSub: { fontSize: 12, color: "#aaa", marginTop: 2 },
-  recoverBtn: { display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", border: "0.5px solid #1D9E75", borderRadius: 7, background: "transparent", cursor: "pointer", fontSize: 12, color: "#1D9E75" },
-  btnPrimary: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", border: "none", borderRadius: 8, background: "#1D9E75", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: 500 },
-  empty: { textAlign: "center", padding: "50px 0", color: "#bbb", fontSize: 14 },
-  goodState: { textAlign: "center", padding: "60px 0", color: "#aaa", fontSize: 14 },
+const styles = {
+  page: { padding: "28px 30px 38px", minHeight: "100vh", background: "radial-gradient(circle at top left,#eff8ff 0%,#f7fbff 35%,#f8f6f0 100%)", fontFamily: "'DM Sans', sans-serif", color: "#11243a" },
+  hero: { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", padding: "22px 24px", borderRadius: 28, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", marginBottom: 18 },
+  eyebrow: { fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: "#0d9488", fontWeight: 700, marginBottom: 8 },
+  heroTitle: { margin: 0, fontSize: 28, lineHeight: 1.08, fontWeight: 800 },
+  heroCopy: { margin: "8px 0 0", fontSize: 14, color: "#708092", maxWidth: 720, lineHeight: 1.6 },
+  heroActions: { display: "flex", gap: 10, flexWrap: "wrap" },
+  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", fontWeight: 800, cursor: "pointer" },
+  secondaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "1px solid rgba(12,68,124,0.12)", background: "#fff", color: "#0c447c", fontWeight: 700, cursor: "pointer" },
+  statGrid: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 18 },
+  statCard: { borderRadius: 22, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", padding: 18, display: "grid", gap: 8 },
+  statIcon: { width: 42, height: 42, borderRadius: 15, display: "grid", placeItems: "center", fontSize: 18 },
+  statValue: { fontSize: 28, lineHeight: 1, color: "#11243a" },
+  statLabel: { fontSize: 13, color: "#516577", fontWeight: 700 },
+  card: { background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", borderRadius: 24, padding: 20, boxShadow: "0 18px 40px rgba(15,23,42,0.06)", marginBottom: 18 },
+  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 16 },
+  cardTitle: { margin: 0, fontSize: 18, fontWeight: 800 },
+  cardCopy: { margin: "5px 0 0", color: "#708092", fontSize: 13, lineHeight: 1.6 },
+  reportBox: { borderRadius: 18, background: "#fbfdff", border: "1px solid rgba(12,68,124,0.08)", padding: 16 },
+  reportSummary: { margin: 0, fontSize: 14, color: "#31475a", lineHeight: 1.7 },
+  reportHighlights: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 },
+  highlight: { padding: "7px 11px", borderRadius: 999, background: "#eef5fb", color: "#0c447c", fontSize: 12, fontWeight: 700 },
+  recommendation: { marginTop: 14, padding: "12px 14px", borderRadius: 16, background: "#e5fbf7", color: "#0d9488", fontSize: 13 },
+  emptyCompact: { padding: "18px 0 8px", color: "#708092", fontSize: 13 },
+  tabs: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 },
+  tab: { display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 999, border: "1px solid rgba(12,68,124,0.08)", background: "#f8fbff", color: "#55697b", fontWeight: 700, cursor: "pointer" },
+  tabActive: { background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", boxShadow: "0 12px 24px rgba(12,68,124,0.18)" },
+  tableWrap: { overflow: "auto", borderRadius: 18, border: "1px solid rgba(12,68,124,0.08)" },
+  table: { width: "100%", minWidth: 760, borderCollapse: "collapse", background: "#fff" },
+  th: { padding: "14px 16px", background: "#f7fbff", color: "#708092", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid rgba(12,68,124,0.08)" },
+  td: { padding: "14px 16px", borderBottom: "1px solid rgba(12,68,124,0.06)", fontSize: 13, color: "#31475a", verticalAlign: "middle" },
+  emptyCell: { padding: 46, color: "#708092", textAlign: "center" },
+  actions: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  openBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 12, border: "1px solid rgba(12,68,124,0.12)", background: "#fff", color: "#0c447c", fontWeight: 800, cursor: "pointer" },
+  recoverBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#0d9488,#16a34a)", color: "#fff", fontWeight: 800, cursor: "pointer" },
+  metaPill: { padding: "6px 11px", borderRadius: 999, background: "#fff4e8", color: "#b45309", fontSize: 12, fontWeight: 800 },
 };

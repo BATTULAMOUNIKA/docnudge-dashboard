@@ -89,7 +89,7 @@ function ProfilePanel({ user, onUserUpdate }) {
       setClinic(current);
       setForm({
         name: current?.name || "",
-        doctor_name: current?.doctor_name || user?.doctor_name || "",
+        doctor_name: user?.doctor_name || current?.doctor_name || user?.name || "",
         designation: current?.designation || user?.designation || "General Physician",
         city: current?.city || "",
         phone: current?.phone || "",
@@ -118,6 +118,7 @@ function ProfilePanel({ user, onUserUpdate }) {
       const payload = response.data || {};
       setClinic(payload);
       onUserUpdate?.({
+        name: payload.user_name || form.doctor_name,
         clinic_name: payload.name,
         doctor_name: payload.doctor_name,
         designation: payload.designation,
