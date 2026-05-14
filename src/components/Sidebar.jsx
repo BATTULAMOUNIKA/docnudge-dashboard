@@ -18,6 +18,7 @@ export default function Sidebar({ user, basePath = "", showAdminNav = true }) {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const doctorWorkspace = Boolean(basePath);
+  const doctorName = user?.doctor_name || user?.email?.split("@")[0] || "Doctor";
 
   function handleLogout() {
     logout();
@@ -41,16 +42,23 @@ export default function Sidebar({ user, basePath = "", showAdminNav = true }) {
       </nav>
 
       <div style={styles.footer}>
-        <div style={styles.userPill}>
+        <button style={styles.userPill} onClick={() => navigate(`${basePath}/settings?tab=profile`)}>
           <div style={styles.avatar}>{user?.email?.slice(0, 2).toUpperCase() || "DR"}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={styles.userName}>{user?.doctor_name || user?.email?.split("@")[0] || "Doctor"}</div>
+            <div style={styles.userName}>{doctorName}</div>
             <div style={styles.userRole}>{user?.designation || user?.role || "admin"}</div>
           </div>
-          <button onClick={handleLogout} title="Logout" style={styles.logoutBtn}>
+          <button
+            onClick={(event) => {
+              event.stopPropagation();
+              handleLogout();
+            }}
+            title="Logout"
+            style={styles.logoutBtn}
+          >
             <i className="ti ti-logout" style={{ fontSize: 15 }} />
           </button>
-        </div>
+        </button>
       </div>
     </aside>
   );
@@ -72,17 +80,17 @@ function NavItem({ to, icon, label, basePath = "" }) {
 }
 
 const styles = {
-  sidebar: { width: 210, minHeight: "100vh", background: "#f8f7f4", borderRight: "0.5px solid rgba(0,0,0,0.09)", display: "flex", flexDirection: "column", flexShrink: 0, fontFamily: "'DM Sans', sans-serif" },
-  logo: { padding: "16px 18px 14px", borderBottom: "0.5px solid rgba(0,0,0,0.07)" },
+  sidebar: { width: 228, minHeight: "100vh", background: "linear-gradient(180deg,#f7fbff 0%,#fdfcf7 100%)", borderRight: "1px solid rgba(12,68,124,0.08)", display: "flex", flexDirection: "column", flexShrink: 0, fontFamily: "'DM Sans', sans-serif" },
+  logo: { padding: "18px 18px 14px", borderBottom: "1px solid rgba(12,68,124,0.06)" },
   logoImg: { width: 142, maxWidth: "100%", display: "block" },
-  nav: { padding: "12px 8px", flex: 1, display: "flex", flexDirection: "column", gap: 2 },
-  divider: { height: "0.5px", background: "rgba(0,0,0,0.07)", margin: "10px 4px" },
-  navItem: { display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontSize: 13, color: "#666", textDecoration: "none", transition: "background 0.12s, color 0.12s" },
-  navActive: { background: "#fff", color: "#1a1a18", fontWeight: 500, border: "0.5px solid rgba(0,0,0,0.09)" },
-  footer: { padding: "12px 12px 16px", borderTop: "0.5px solid rgba(0,0,0,0.07)" },
-  userPill: { display: "flex", alignItems: "center", gap: 8 },
-  avatar: { width: 30, height: 30, borderRadius: "50%", background: "#E1F5EE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: "#0F6E56", flexShrink: 0 },
-  userName: { fontSize: 12, fontWeight: 500, color: "#1a1a18", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  userRole: { fontSize: 11, color: "#aaa", textTransform: "capitalize" },
-  logoutBtn: { background: "none", border: "none", cursor: "pointer", color: "#bbb", padding: 4, display: "flex", alignItems: "center" },
+  nav: { padding: "14px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 6 },
+  divider: { height: "1px", background: "rgba(12,68,124,0.08)", margin: "8px 6px" },
+  navItem: { display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", borderRadius: 14, cursor: "pointer", fontSize: 13, color: "#4f5f6f", textDecoration: "none", transition: "background 0.12s, color 0.12s, transform 0.12s" },
+  navActive: { background: "linear-gradient(135deg,rgba(12,68,124,0.94),rgba(13,148,136,0.92))", color: "#fff", fontWeight: 700, boxShadow: "0 12px 30px rgba(12,68,124,0.18)" },
+  footer: { padding: "12px 12px 18px", borderTop: "1px solid rgba(12,68,124,0.06)" },
+  userPill: { width: "100%", display: "flex", alignItems: "center", gap: 10, padding: 10, borderRadius: 16, border: "1px solid rgba(12,68,124,0.08)", background: "#fff", cursor: "pointer", textAlign: "left", boxShadow: "0 10px 25px rgba(15,23,42,0.05)" },
+  avatar: { width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg,#0c447c,#0d9488)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0 },
+  userName: { fontSize: 13, fontWeight: 700, color: "#11243a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  userRole: { fontSize: 11, color: "#708092", textTransform: "capitalize", marginTop: 2 },
+  logoutBtn: { background: "#f6f8fb", border: "1px solid rgba(12,68,124,0.08)", cursor: "pointer", color: "#708092", padding: 7, borderRadius: 10, display: "flex", alignItems: "center" },
 };

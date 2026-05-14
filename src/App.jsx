@@ -63,7 +63,7 @@ export default function App() {
           <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/dashboard" replace />} />
           <Route
             path="/*"
-            element={!user ? <Navigate to="/login" replace /> : <DoctorWorkspace user={user} clinicId={resolvedClinicId} />}
+            element={!user ? <Navigate to="/login" replace /> : <DoctorWorkspace user={user} clinicId={resolvedClinicId} onUserUpdate={(patch) => setUser((current) => ({ ...current, ...patch }))} />}
           />
         </Routes>
       </AppErrorBoundary>
@@ -71,21 +71,21 @@ export default function App() {
   );
 }
 
-function DoctorWorkspace({ user, clinicId }) {
+function DoctorWorkspace({ user, clinicId, onUserUpdate }) {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#f8f7f4", fontFamily: "'DM Sans', sans-serif" }}>
       <Sidebar user={user} showAdminNav={false} />
       <main style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
         <Routes>
-          <Route path="/dashboard" element={<Dashboard clinicId={clinicId} />} />
+          <Route path="/dashboard" element={<Dashboard clinicId={clinicId} user={user} />} />
           <Route path="/queue" element={<QueuePage clinicId={clinicId} />} />
-          <Route path="/appointments" element={<Appointments clinicId={clinicId} />} />
-          <Route path="/patients" element={<Patients clinicId={clinicId} />} />
-          <Route path="/patients/add" element={<AddPatient clinicId={clinicId} />} />
+          <Route path="/appointments" element={<Appointments clinicId={clinicId} user={user} />} />
+          <Route path="/patients" element={<Patients clinicId={clinicId} user={user} />} />
+          <Route path="/patients/add" element={<AddPatient clinicId={clinicId} user={user} />} />
           <Route path="/patients/:patientId" element={<OPSheet clinicId={clinicId} user={user} />} />
           <Route path="/reminders" element={<Reminders clinicId={clinicId} />} />
           <Route path="/recovery" element={<Recovery clinicId={clinicId} />} />
-          <Route path="/settings" element={<Settings user={user} />} />
+          <Route path="/settings" element={<Settings user={user} onUserUpdate={onUserUpdate} />} />
           <Route path="/admin" element={<Navigate to="/dashboard" replace />} />
           <Route path="/admin/staff" element={<Navigate to="/dashboard" replace />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

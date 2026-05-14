@@ -1,74 +1,80 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import API from "../api";
+import { SPECIALITY_OPTIONS } from "../lib/clinicalOptions";
 
-const ADMIN_TABS = [
-  ["clinics", "Clinics & staff", "ti-building-hospital"],
-  ["reminders", "Reminders", "ti-bell"],
-  ["whatsapp", "WhatsApp", "ti-brand-whatsapp"],
-  ["account", "Security", "ti-lock"],
+const DOCTOR_TABS = [
+  ["profile", "Profile", "ti-user-circle"],
+  ["security", "Security", "ti-lock"],
 ];
 
-export default function Settings({ user }) {
-  const isAdmin = user?.role === "admin";
-  const [tab, setTab] = useState(isAdmin ? "clinics" : "account");
+const ADMIN_TABS = [
+  ["profile", "Clinic profile", "ti-building-hospital"],
+  ["reminders", "Reminders", "ti-bell"],
+  ["security", "Security", "ti-lock"],
+];
 
-  if (!isAdmin) {
-    return (
-      <div style={styles.page}>
-        <PageTitle />
-        <div style={styles.adminNotice}>
-          <i className="ti ti-lock" /> Clinic credentials and automation settings are admin-only.
-        </div>
-        <AccountSettings user={user} />
-      </div>
-    );
+export default function Settings({ user, onUserUpdate }) {
+  const isAdmin = user?.role === "admin";
+  const tabs = isAdmin ? ADMIN_TABS : DOCTOR_TABS;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = useMemo(() => {
+    const fromQuery = searchParams.get("tab");
+    return tabs.some(([id]) => id === fromQuery) ? fromQuery : tabs[0][0];
+  }, [searchParams, tabs]);
+
+  function setTab(nextTab) {
+    setSearchParams({ tab: nextTab });
   }
 
   return (
     <div style={styles.page}>
-      <header style={styles.topbar}>
-        <PageTitle />
-        <div style={styles.adminBadge}><i className="ti ti-shield-check" /> Admin workspace</div>
-      </header>
+      <section style={styles.hero}>
+        <div>
+          <div style={styles.eyebrow}>Settings</div>
+          <h1 style={styles.heroTitle}>{isAdmin ? "Clinic administration" : "Doctor profile and security"}</h1>
+          <p style={styles.heroCopy}>
+            {isAdmin
+              ? "Keep clinic identity, reminder settings, and access details aligned."
+              : "Update your name, clinic identity, specialty, and password from one calm workspace."}
+          </p>
+        </div>
+      </section>
 
-      <div style={styles.settingsLayout}>
-        <aside style={styles.settingsNav}>
-          {ADMIN_TABS.map(([key, label, icon]) => (
-            <button key={key} style={{ ...styles.navItem, ...(tab === key ? styles.navActive : {}) }} onClick={() => setTab(key)}>
+      <div style={styles.layout}>
+        <aside style={styles.navCard}>
+          {tabs.map(([id, label, icon]) => (
+            <button key={id} style={{ ...styles.navItem, ...(activeTab === id ? styles.navItemActive : {}) }} onClick={() => setTab(id)}>
               <i className={`ti ${icon}`} />
               <span>{label}</span>
             </button>
           ))}
         </aside>
 
-        <section style={styles.panelStack}>
-          {tab === "clinics" && <ClinicAdminSettings />}
-          {tab === "reminders" && <ReminderSettings />}
-          {tab === "whatsapp" && <WhatsAppSettings />}
-          {tab === "account" && <AccountSettings user={user} />}
+        <section style={styles.content}>
+          {activeTab === "profile" && <ProfilePanel user={user} onUserUpdate={onUserUpdate} />}
+          {activeTab === "security" && <SecurityPanel user={user} />}
+          {isAdmin && activeTab === "reminders" && <ReminderPanel />}
         </section>
       </div>
     </div>
   );
 }
 
-function PageTitle() {
-  return (
-    <div style={styles.pageTitle}>
-      <div style={styles.titleIcon}><i className="ti ti-settings" /></div>
-      <div>
-        <h1 style={styles.title}>Admin Settings</h1>
-        <p style={styles.sub}>Manage clinic setup, reminders, WhatsApp configuration and login security.</p>
-      </div>
-    </div>
-  );
-}
-
-function ClinicAdminSettings() {
-  const [clinics, setClinics] = useState([]);
-  const [users, setUsers] = useState([]);
+function ProfilePanel({ user, onUserUpdate }) {
+  const [clinic, setClinic] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    doctor_name: "",
+    designation: "General Physician",
+    city: "",
+    phone: "",
+    email: "",
+  });
 
   useEffect(() => {
     load();
@@ -78,279 +84,256 @@ function ClinicAdminSettings() {
     setLoading(true);
     setError("");
     try {
-      const [clinicResponse, userResponse] = await Promise.all([
-        API.get("/clinics"),
-        API.get("/admin/users"),
-      ]);
-      setClinics(clinicResponse.data || []);
-      setUsers(userResponse.data || []);
+      const response = await API.get("/clinics");
+      const current = response.data?.[0] || null;
+      setClinic(current);
+      setForm({
+        name: current?.name || "",
+        doctor_name: current?.doctor_name || user?.doctor_name || "",
+        designation: current?.designation || user?.designation || "General Physician",
+        city: current?.city || "",
+        phone: current?.phone || "",
+        email: current?.email || user?.email || "",
+      });
     } catch (err) {
-      setError(err.response?.data?.detail || "Could not load admin settings.");
+      setError(err.response?.data?.detail || "Could not load profile.");
     } finally {
       setLoading(false);
     }
   }
 
-  const doctors = users.filter((item) => item.role === "doctor");
-  const staff = users.filter((item) => item.role !== "admin");
+  async function saveProfile() {
+    setSaving(true);
+    setSaved(false);
+    setError("");
+    try {
+      const response = await API.put("/clinic/settings", {
+        name: form.name,
+        doctor_name: form.doctor_name,
+        designation: form.designation,
+        city: form.city,
+        phone: form.phone,
+        email: form.email,
+      });
+      const payload = response.data || {};
+      setClinic(payload);
+      onUserUpdate?.({
+        clinic_name: payload.name,
+        doctor_name: payload.doctor_name,
+        designation: payload.designation,
+      });
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not save profile.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <>
-      <div style={styles.summaryGrid}>
-        <SummaryTile label="Clinics" value={clinics.length} icon="ti-building-hospital" tone="purple" />
-        <SummaryTile label="Doctors" value={doctors.length} icon="ti-stethoscope" tone="green" />
-        <SummaryTile label="Staff users" value={staff.length} icon="ti-users" tone="blue" />
+    <article style={styles.panel}>
+      <div style={styles.panelHeader}>
+        <div>
+          <h2 style={styles.panelTitle}>My profile</h2>
+          <p style={styles.panelCopy}>This is the doctor identity shown in patient records, OP sheets, and the sidebar profile.</p>
+        </div>
+        {saved && <span style={styles.savedPill}>Saved</span>}
       </div>
 
-      <Panel
-        title="Clinics and staff credentials"
-        copy="Review clinic setup and doctor access from the admin dashboard."
-        action={<button style={styles.btnPurple} onClick={load}><i className="ti ti-refresh" /> Refresh</button>}
-      >
-        {error && <div style={styles.errorBox}>{error}</div>}
-        {loading ? (
-          <div style={styles.empty}>Loading clinics...</div>
-        ) : clinics.length === 0 ? (
-          <div style={styles.empty}>No clinics found.</div>
-        ) : (
-          <div style={styles.clinicCards}>
-            {clinics.map((clinic) => {
-              const clinicUsers = users.filter((item) => item.clinic_id === clinic.id);
-              return <ClinicCard key={clinic.id} clinic={clinic} users={clinicUsers} />;
-            })}
+      {loading ? (
+        <div style={styles.emptyState}>Loading profile...</div>
+      ) : (
+        <>
+          <div style={styles.profileHero}>
+            <div style={styles.avatar}>{initials(form.doctor_name || form.name || "Doctor")}</div>
+            <div>
+              <strong style={styles.profileName}>Dr. {form.doctor_name || "Doctor"}</strong>
+              <div style={styles.profileSub}>{form.name || "Clinic"} · {form.designation || "General Physician"}</div>
+            </div>
           </div>
-        )}
-      </Panel>
-    </>
+
+          <div style={styles.formGrid}>
+            <Field label="Doctor name">
+              <input style={styles.input} value={form.doctor_name} onChange={(event) => setForm((current) => ({ ...current, doctor_name: event.target.value }))} />
+            </Field>
+            <Field label="Clinic name">
+              <input style={styles.input} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+            </Field>
+            <Field label="Specialty">
+              <select style={styles.input} value={form.designation} onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))}>
+                {SPECIALITY_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </Field>
+            <Field label="Clinic city">
+              <input style={styles.input} value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} />
+            </Field>
+            <Field label="Clinic phone">
+              <input style={styles.input} value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+            </Field>
+            <Field label="Clinic email">
+              <input style={styles.input} value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+            </Field>
+          </div>
+
+          <div style={styles.infoStrip}>
+            <i className="ti ti-info-circle" />
+            <span>Consulting doctor names now come from this profile, not from the clinic fallback label.</span>
+          </div>
+
+          {error && <div style={styles.errorBox}>{error}</div>}
+          <div style={styles.footer}>
+            <button style={styles.primaryBtn} disabled={saving} onClick={saveProfile}>
+              {saving ? "Saving..." : "Save profile"}
+            </button>
+          </div>
+        </>
+      )}
+    </article>
   );
 }
 
-function ClinicCard({ clinic, users }) {
-  const doctors = users.filter((item) => item.role === "doctor");
+function SecurityPanel({ user }) {
+  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  async function changePassword() {
+    if (!pw.current || !pw.next || !pw.confirm) {
+      setError("Fill all password fields.");
+      return;
+    }
+    if (pw.next !== pw.confirm) {
+      setError("New password and confirm password do not match.");
+      return;
+    }
+    setSaving(true);
+    setSaved(false);
+    setError("");
+    try {
+      await API.put("/auth/change-password", { current_password: pw.current, new_password: pw.next });
+      setPw({ current: "", next: "", confirm: "" });
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not change password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <article style={styles.clinicCard}>
-      <div style={styles.clinicCardHeader}>
-        <div style={styles.clinicInfo}>
-          <div style={styles.clinicAvatar}>{initials(clinic.name || "DN")}</div>
-          <div>
-            <strong style={styles.clinicName}>{clinic.name || "DocNudge Clinic"}</strong>
-            <span style={styles.clinicMeta}>{clinic.city || "City not set"} · {doctors.length} doctor{doctors.length === 1 ? "" : "s"}</span>
-          </div>
+    <article style={styles.panel}>
+      <div style={styles.panelHeader}>
+        <div>
+          <h2 style={styles.panelTitle}>Password and access</h2>
+          <p style={styles.panelCopy}>{user?.email || "Current account"} · Keep your doctor login secure.</p>
         </div>
-        <span style={styles.statusTag}>Active</span>
+        {saved && <span style={styles.savedPill}>Updated</span>}
       </div>
-      <div style={styles.clinicBody}>
-        <div style={styles.detailGrid}>
-          <Detail label="Clinic ID" value={clinic.id || "-"} />
-          <Detail label="Phone" value={clinic.phone || "Not set"} />
-          <Detail label="Plan" value={clinic.plan || "Trial"} />
-        </div>
-        <div style={styles.doctorsTitle}>Doctors and staff access</div>
-        {users.length === 0 ? (
-          <div style={styles.emptySmall}>No staff accounts linked.</div>
-        ) : (
-          <table style={styles.staffTable}>
-            <thead>
-              <tr>
-                <th style={styles.staffTh}>Name</th>
-                <th style={styles.staffTh}>Role</th>
-                <th style={styles.staffTh}>Email</th>
-                <th style={styles.staffTh}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((item) => (
-                <tr key={item.id || item.email}>
-                  <td style={styles.staffTd}><span style={styles.docAvatar}>{initials(item.name || item.email || "DN")}</span>{item.name || "Staff user"}</td>
-                  <td style={styles.staffTd}><span style={styles.specialistTag}>{item.role || "staff"}</span></td>
-                  <td style={styles.staffTd}><span style={styles.credBox}>{item.email || "-"}</span></td>
-                  <td style={styles.staffTd}><span style={styles.activeDot} />Active</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+
+      <div style={styles.formGrid}>
+        <Field label="Current password">
+          <input style={styles.input} type="password" value={pw.current} onChange={(event) => setPw((current) => ({ ...current, current: event.target.value }))} />
+        </Field>
+        <Field label="New password">
+          <input style={styles.input} type="password" value={pw.next} onChange={(event) => setPw((current) => ({ ...current, next: event.target.value }))} />
+        </Field>
+        <Field label="Confirm password">
+          <input style={styles.input} type="password" value={pw.confirm} onChange={(event) => setPw((current) => ({ ...current, confirm: event.target.value }))} />
+        </Field>
+      </div>
+      {error && <div style={styles.errorBox}>{error}</div>}
+      <div style={styles.footer}>
+        <button style={styles.primaryBtn} disabled={saving} onClick={changePassword}>
+          {saving ? "Updating..." : "Update password"}
+        </button>
       </div>
     </article>
   );
 }
 
-function ReminderSettings() {
+function ReminderPanel() {
   const [form, setForm] = useState({ two_days_time: "10:00", day_before_time: "18:00", morning_time: "08:00", missed_days: 3 });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
   async function save() {
+    setSaved(false);
+    setError("");
     try {
       await API.put("/settings/reminders", form);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      alert("Error saving");
+      window.setTimeout(() => setSaved(false), 2200);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Could not save reminder settings.");
     }
   }
 
   return (
-    <Panel title="Reminder schedule" copy="Control when DocNudge sends follow-up and visit reminders.">
-      <div style={styles.formGrid}>
-        <Field label="2 days before"><Input type="time" value={form.two_days_time} onChange={(v) => setForm((f) => ({ ...f, two_days_time: v }))} /></Field>
-        <Field label="Day before"><Input type="time" value={form.day_before_time} onChange={(v) => setForm((f) => ({ ...f, day_before_time: v }))} /></Field>
-        <Field label="Morning of visit"><Input type="time" value={form.morning_time} onChange={(v) => setForm((f) => ({ ...f, morning_time: v }))} /></Field>
-        <Field label="Missed patient days"><Input type="number" min={1} max={14} value={form.missed_days} onChange={(v) => setForm((f) => ({ ...f, missed_days: Number(v) }))} /></Field>
-      </div>
-      <SaveBtn onClick={save} saved={saved} />
-    </Panel>
-  );
-}
-
-function WhatsAppSettings() {
-  return (
-    <Panel title="WhatsApp / Interakt" copy="Production WhatsApp credentials are handled through secure environment variables.">
-      <div style={styles.integrationCard}>
-        <div style={styles.integrationIcon}><i className="ti ti-brand-whatsapp" /></div>
-        <div>
-          <strong>Interakt API key</strong>
-          <p>Configure `INTERAKT_API_KEY` in the backend environment. Keep the key out of the browser bundle.</p>
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
-function AccountSettings({ user }) {
-  const [pw, setPw] = useState({ current: "", new_: "", confirm: "" });
-  const [saved, setSaved] = useState(false);
-
-  async function changePassword() {
-    if (pw.new_ !== pw.confirm) {
-      alert("Passwords don't match");
-      return;
-    }
-    try {
-      await API.put("/auth/change-password", { current_password: pw.current, new_password: pw.new_ });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      setPw({ current: "", new_: "", confirm: "" });
-    } catch {
-      alert("Error changing password");
-    }
-  }
-
-  return (
-    <Panel title="Login credentials" copy={user?.email || "Current user"}>
-      <div style={styles.formGrid}>
-        <Field label="Current password"><Input type="password" value={pw.current} onChange={(v) => setPw((p) => ({ ...p, current: v }))} /></Field>
-        <Field label="New password"><Input type="password" value={pw.new_} onChange={(v) => setPw((p) => ({ ...p, new_: v }))} /></Field>
-        <Field label="Confirm password"><Input type="password" value={pw.confirm} onChange={(v) => setPw((p) => ({ ...p, confirm: v }))} /></Field>
-      </div>
-      <SaveBtn onClick={changePassword} saved={saved} label="Update password" />
-    </Panel>
-  );
-}
-
-function Panel({ title, copy, action, children }) {
-  return (
-    <article style={styles.panelCard}>
+    <article style={styles.panel}>
       <div style={styles.panelHeader}>
         <div>
-          <h2 style={styles.panelTitle}>{title}</h2>
-          <p style={styles.panelCopy}>{copy}</p>
+          <h2 style={styles.panelTitle}>Reminder schedule</h2>
+          <p style={styles.panelCopy}>Control when the clinic reminder engine sends follow-up nudges.</p>
         </div>
-        {action}
+        {saved && <span style={styles.savedPill}>Saved</span>}
       </div>
-      <div style={styles.panelBody}>{children}</div>
+      <div style={styles.formGrid}>
+        <Field label="Two days before"><input style={styles.input} type="time" value={form.two_days_time} onChange={(event) => setForm((current) => ({ ...current, two_days_time: event.target.value }))} /></Field>
+        <Field label="Day before"><input style={styles.input} type="time" value={form.day_before_time} onChange={(event) => setForm((current) => ({ ...current, day_before_time: event.target.value }))} /></Field>
+        <Field label="Morning of visit"><input style={styles.input} type="time" value={form.morning_time} onChange={(event) => setForm((current) => ({ ...current, morning_time: event.target.value }))} /></Field>
+        <Field label="Missed patient days"><input style={styles.input} type="number" min={1} max={14} value={form.missed_days} onChange={(event) => setForm((current) => ({ ...current, missed_days: Number(event.target.value) }))} /></Field>
+      </div>
+      {error && <div style={styles.errorBox}>{error}</div>}
+      <div style={styles.footer}>
+        <button style={styles.primaryBtn} onClick={save}>Save reminder settings</button>
+      </div>
     </article>
   );
-}
-
-function SummaryTile({ label, value, icon, tone }) {
-  const palette = {
-    purple: ["#f5f3ff", "#7c3aed"],
-    green: ["#f0fdf4", "#16a34a"],
-    blue: ["#eff6ff", "#2563eb"],
-  }[tone];
-  return (
-    <article style={styles.summaryTile}>
-      <div style={{ ...styles.summaryIcon, background: palette[0], color: palette[1] }}><i className={`ti ${icon}`} /></div>
-      <strong>{value}</strong>
-      <span>{label}</span>
-    </article>
-  );
-}
-
-function Detail({ label, value }) {
-  return <div style={styles.detailItem}><label>{label}</label><span>{value}</span></div>;
 }
 
 function Field({ label, children }) {
   return <label style={styles.field}><span>{label}</span>{children}</label>;
 }
 
-function Input({ value, onChange, ...props }) {
-  return <input style={styles.input} value={value} onChange={(e) => onChange?.(e.target.value)} {...props} />;
-}
-
-function SaveBtn({ onClick, saved, label = "Save changes" }) {
-  return <button style={styles.btnPurple} onClick={onClick}>{saved ? "Saved" : label}</button>;
-}
-
-function initials(value) {
+function initials(value = "") {
   return String(value)
-    .split(/[\s@.]+/)
+    .split(/\s+/)
     .filter(Boolean)
-    .map((part) => part[0])
     .slice(0, 2)
+    .map((part) => part[0])
     .join("")
     .toUpperCase() || "DN";
 }
 
 const styles = {
-  page: { padding: "24px 28px 34px", minHeight: "100vh", background: "#f4f6fb", fontFamily: "'DM Sans', sans-serif", color: "#1a2035" },
-  topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 24 },
-  pageTitle: { display: "flex", alignItems: "center", gap: 12 },
-  titleIcon: { width: 42, height: 42, borderRadius: 12, background: "#f5f3ff", color: "#7c3aed", display: "grid", placeItems: "center", fontSize: 20 },
-  title: { margin: 0, fontSize: 24, lineHeight: 1, fontWeight: 800 },
-  sub: { margin: "6px 0 0", color: "#64748b", fontSize: 13 },
-  adminBadge: { display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 13px", background: "#f5f3ff", border: "1px solid #ddd6fe", color: "#7c3aed", borderRadius: 999, fontSize: 12, fontWeight: 800 },
-  settingsLayout: { display: "grid", gridTemplateColumns: "220px minmax(0,1fr)", gap: 24 },
-  settingsNav: { background: "#fff", border: "1.5px solid #e8eaf0", borderRadius: 16, padding: 12, height: "fit-content", position: "sticky", top: 84 },
-  navItem: { width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "none", borderRadius: 10, background: "transparent", color: "#64748b", fontSize: 14, fontWeight: 800, cursor: "pointer", textAlign: "left" },
-  navActive: { background: "#f5f3ff", color: "#7c3aed" },
-  panelStack: { display: "flex", flexDirection: "column", gap: 18, minWidth: 0 },
-  summaryGrid: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 14 },
-  summaryTile: { background: "#fff", border: "1.5px solid #e8eaf0", borderRadius: 16, padding: 18 },
-  summaryIcon: { width: 38, height: 38, borderRadius: 10, display: "grid", placeItems: "center", fontSize: 18, marginBottom: 12 },
-  panelCard: { background: "#fff", border: "1.5px solid #e8eaf0", borderRadius: 16, overflow: "hidden" },
-  panelHeader: { padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 },
-  panelTitle: { margin: 0, fontSize: 18, fontWeight: 800 },
-  panelCopy: { margin: "4px 0 0", color: "#64748b", fontSize: 13 },
-  panelBody: { padding: 24 },
-  btnPurple: { display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 18px", border: "none", borderRadius: 10, background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.24)" },
-  clinicCards: { display: "flex", flexDirection: "column", gap: 16 },
-  clinicCard: { border: "1.5px solid #e8eaf0", borderRadius: 14, overflow: "hidden" },
-  clinicCardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "16px 20px", background: "#fafafa", borderBottom: "1px solid #f1f5f9" },
-  clinicInfo: { display: "flex", alignItems: "center", gap: 12 },
-  clinicAvatar: { width: 42, height: 42, borderRadius: 12, background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800 },
-  clinicName: { display: "block", fontSize: 15, color: "#1a2035" },
-  clinicMeta: { display: "block", marginTop: 3, color: "#64748b", fontSize: 12 },
-  statusTag: { padding: "5px 11px", borderRadius: 999, background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", fontSize: 12, fontWeight: 800 },
-  clinicBody: { padding: "16px 20px" },
-  detailGrid: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12, marginBottom: 18 },
-  detailItem: { display: "grid", gap: 4 },
-  doctorsTitle: { marginBottom: 12, color: "#94a3b8", textTransform: "uppercase", fontSize: 12, fontWeight: 800 },
-  staffTable: { width: "100%", borderCollapse: "collapse" },
-  staffTh: { padding: "9px 12px", background: "#f8fafc", color: "#94a3b8", textTransform: "uppercase", textAlign: "left", fontSize: 11, fontWeight: 800 },
-  staffTd: { padding: "11px 12px", borderBottom: "1px solid #f8fafc", fontSize: 13, color: "#475569" },
-  docAvatar: { width: 30, height: 30, borderRadius: 8, background: "linear-gradient(135deg,#16a34a,#4ade80)", color: "#fff", display: "inline-grid", placeItems: "center", fontSize: 11, fontWeight: 800, marginRight: 8 },
-  specialistTag: { display: "inline-block", padding: "4px 9px", borderRadius: 999, background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontSize: 12, fontWeight: 800 },
-  credBox: { display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 6, background: "#f8fafc", border: "1px solid #e8eaf0", fontFamily: "monospace", fontSize: 12, color: "#475569" },
-  activeDot: { width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block", marginRight: 6 },
-  formGrid: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14, marginBottom: 16 },
-  field: { display: "grid", gap: 7, color: "#64748b", fontSize: 12, fontWeight: 800, textTransform: "uppercase" },
-  input: { width: "100%", padding: "10px 12px", border: "1.5px solid #e8eaf0", borderRadius: 10, background: "#f8fafc", color: "#1a2035", outline: "none", fontSize: 13, fontFamily: "inherit" },
-  integrationCard: { display: "flex", alignItems: "flex-start", gap: 14, border: "1.5px solid #bbf7d0", background: "#f0fdf4", borderRadius: 14, padding: 16, color: "#14532d" },
-  integrationIcon: { width: 42, height: 42, borderRadius: 12, background: "#16a34a", color: "#fff", display: "grid", placeItems: "center", fontSize: 20, flexShrink: 0 },
-  adminNotice: { display: "inline-flex", alignItems: "center", gap: 7, background: "#FAEEDA", border: "0.5px solid #FAC775", color: "#633806", borderRadius: 8, padding: "9px 12px", fontSize: 12, margin: "18px 0" },
-  errorBox: { background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", borderRadius: 10, padding: 12, marginBottom: 14, fontSize: 13, fontWeight: 700 },
-  empty: { textAlign: "center", color: "#94a3b8", padding: 34 },
-  emptySmall: { color: "#94a3b8", fontSize: 13, padding: "8px 0" },
+  page: { padding: "28px 30px 38px", minHeight: "100vh", background: "radial-gradient(circle at top left,#eff8ff 0%,#f7fbff 35%,#f8f6f0 100%)", fontFamily: "'DM Sans', sans-serif", color: "#11243a" },
+  hero: { padding: "22px 24px", borderRadius: 28, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", marginBottom: 18 },
+  eyebrow: { fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: "#0d9488", fontWeight: 700, marginBottom: 8 },
+  heroTitle: { margin: 0, fontSize: 28, lineHeight: 1.08, fontWeight: 800 },
+  heroCopy: { margin: "8px 0 0", fontSize: 14, color: "#708092", maxWidth: 760, lineHeight: 1.6 },
+  layout: { display: "grid", gridTemplateColumns: "240px minmax(0,1fr)", gap: 18 },
+  navCard: { padding: 10, borderRadius: 24, background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", height: "fit-content" },
+  navItem: { width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 16, border: "none", background: "transparent", color: "#56697b", fontSize: 14, fontWeight: 700, cursor: "pointer", textAlign: "left" },
+  navItemActive: { background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", boxShadow: "0 14px 28px rgba(12,68,124,0.18)" },
+  content: { display: "grid", gap: 18 },
+  panel: { borderRadius: 24, background: "rgba(255,255,255,0.92)", border: "1px solid rgba(12,68,124,0.08)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)", padding: 22 },
+  panelHeader: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 18 },
+  panelTitle: { margin: 0, fontSize: 20, fontWeight: 800 },
+  panelCopy: { margin: "5px 0 0", fontSize: 13, color: "#708092", lineHeight: 1.6 },
+  savedPill: { padding: "7px 12px", borderRadius: 999, background: "#e5fbf7", color: "#0d9488", fontSize: 12, fontWeight: 800 },
+  profileHero: { display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", borderRadius: 20, background: "#fbfdff", border: "1px solid rgba(12,68,124,0.08)", marginBottom: 18 },
+  avatar: { width: 56, height: 56, borderRadius: 18, background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 18 },
+  profileName: { display: "block", fontSize: 18, color: "#11243a" },
+  profileSub: { marginTop: 4, fontSize: 13, color: "#708092" },
+  formGrid: { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 },
+  field: { display: "grid", gap: 7, color: "#526677", fontSize: 12, fontWeight: 800, textTransform: "uppercase" },
+  input: { width: "100%", padding: "11px 12px", borderRadius: 14, border: "1px solid rgba(12,68,124,0.12)", background: "#fbfdff", color: "#11243a", outline: "none", fontFamily: "inherit" },
+  infoStrip: { marginTop: 16, display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderRadius: 16, background: "#eef5fb", color: "#38536c", fontSize: 13 },
+  errorBox: { marginTop: 16, padding: "11px 13px", borderRadius: 14, background: "#fff3f2", border: "1px solid rgba(184,59,46,0.12)", color: "#b83b2e", fontSize: 13 },
+  footer: { display: "flex", justifyContent: "flex-end", marginTop: 18 },
+  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", fontWeight: 800, cursor: "pointer", boxShadow: "0 18px 30px rgba(12,68,124,0.22)" },
+  emptyState: { padding: "28px 0", color: "#708092" },
 };

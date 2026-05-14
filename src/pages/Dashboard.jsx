@@ -1,25 +1,44 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getClinics, getPatients, getReminderLogs, getVisitsByClinic } from "../api";
-
-function todayLabel() {
-  return new Date().toLocaleDateString("en-IN", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+import { getAppointments, getClinics, getPatients, getReminderLogs } from "../api";
 
 function routePrefix() {
   return window.location.pathname.startsWith("/doctor") ? "/doctor" : "";
 }
 
-export default function Dashboard({ clinicId: initialClinicId }) {
+function todayIso() {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function todayLabel() {
+  return new Date().toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function initials(value = "") {
+  return String(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "DN";
+}
+
+export default function Dashboard({ clinicId: initialClinicId, user }) {
   const navigate = useNavigate();
   const [clinic, setClinic] = useState(null);
   const [patients, setPatients] = useState([]);
-  const [queue, setQueue] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,15 +51,22 @@ export default function Dashboard({ clinicId: initialClinicId }) {
     try {
       const clinicsResponse = await getClinics();
       const activeClinic = clinicsResponse.data.find((item) => String(item.id) === String(initialClinicId)) || clinicsResponse.data[0];
-      if (!activeClinic) return;
+      if (!activeClinic) {
+        setClinic(null);
+        setPatients([]);
+        setAppointments([]);
+        setLogs([]);
+        return;
+      }
       setClinic(activeClinic);
-      const [patientsResponse, visits, logResponse] = await Promise.all([
+      const today = todayIso();
+      const [patientsResponse, appointmentResponse, logResponse] = await Promise.all([
         getPatients(activeClinic.id),
-        getVisitsByClinic(activeClinic.id).catch(() => []),
+        getAppointments(activeClinic.id, today, today).catch(() => ({ data: [] })),
         getReminderLogs(activeClinic.id).catch(() => ({ data: [] })),
       ]);
       setPatients(patientsResponse.data || []);
-      setQueue(Array.isArray(visits) ? visits : []);
+      setAppointments(appointmentResponse.data || []);
       setLogs(logResponse.data || []);
     } catch (error) {
       console.error(error);
@@ -49,197 +75,286 @@ export default function Dashboard({ clinicId: initialClinicId }) {
     }
   }
 
-  const stats = useMemo(() => {
-    const failed = logs.filter((row) => Array.isArray(row) ? !row[0]?.success : !row.success).length;
-    return [
-      { label: "Total patients", value: patients.length, hint: "Registered", icon: "ti-users", color: "#1D9E75", bg: "#E1F5EE" },
-      { label: "Appointments", value: queue.length, hint: "Open the date view", icon: "ti-calendar-event", color: "#0C447C", bg: "#E6F1FB" },
-      { label: "Recent patients", value: Math.min(patients.length, 5), hint: "Latest records", icon: "ti-user-heart", color: "#3B6D11", bg: "#EAF3DE" },
-      { label: "Needs recovery", value: failed, hint: "Failed reminders", icon: "ti-alert-triangle", color: "#712B13", bg: "#FAECE7" },
-    ];
-  }, [patients, queue, logs]);
+  const doctorName = user?.doctor_name || clinic?.doctor_name || "Doctor";
+  const designation = user?.designation || clinic?.designation || "General Physician";
 
-  const recentPatients = patients.slice(0, 5);
-  const atRisk = patients.filter((patient) => patient.opted_out).slice(0, 4);
-  const weekData = [patients.length, queue.length + 2, queue.length + 5, Math.max(queue.length - 1, 1), queue.length + 4, queue.length + 1, Math.max(queue.length - 2, 0)];
-  const maxWeek = Math.max(...weekData, 1);
+  const reminderDisabled = patients.filter((patient) => patient.reminder_enabled === false).length;
+  const followupEnabled = patients.filter((patient) => patient.followup_enabled !== false).length;
+  const failedReminders = logs
+    .map((row) => (Array.isArray(row) ? row : [row, null]))
+    .filter(([log]) => !log?.success);
+  const failedPatients = failedReminders.slice(0, 4);
+  const upcomingPatients = patients
+    .filter((patient) => patient.followup_enabled !== false)
+    .slice(0, 4);
+
+  const stats = useMemo(
+    () => [
+      { label: "Total patients", value: patients.length, hint: "Registered records", icon: "ti-users", tone: "blue" },
+      { label: "Today's appointments", value: appointments.length, hint: "Live doctor day", icon: "ti-calendar-event", tone: "teal" },
+      { label: "Follow-up enabled", value: followupEnabled, hint: "Care plans running", icon: "ti-heart-rate-monitor", tone: "green" },
+      { label: "Needs recovery", value: failedReminders.length, hint: "Failed reminders", icon: "ti-alert-triangle", tone: "amber" },
+    ],
+    [appointments.length, failedReminders.length, followupEnabled, patients.length]
+  );
 
   return (
     <div style={styles.page}>
       <section style={styles.hero}>
         <div>
-          <div style={styles.eyebrow}>Good morning, Doctor</div>
-          <h1 style={styles.title}>{clinic?.name || "DocNudge Clinic"}</h1>
-          <p style={styles.sub}>{todayLabel()} - Live clinic workspace</p>
+          <div style={styles.eyebrow}>Doctor workspace</div>
+          <h1 style={styles.heroTitle}>Good day, Dr. {doctorName}</h1>
+          <p style={styles.heroCopy}>
+            {clinic?.name || "DocNudge Clinic"} · {designation} · {todayLabel()}
+          </p>
         </div>
         <div style={styles.heroActions}>
-          <span style={styles.openBadge}><span style={styles.openDot} /> Clinic open</span>
-          <button style={styles.primaryBtn} onClick={() => navigate(`${routePrefix()}/patients/add`)}>
-            <i className="ti ti-user-plus" /> New patient
+          <button style={styles.primaryBtn} onClick={() => navigate(`${routePrefix()}/appointments`)}>
+            <i className="ti ti-calendar-event" /> Open appointments
+          </button>
+          <button style={styles.secondaryBtn} onClick={() => navigate(`${routePrefix()}/settings?tab=profile`)}>
+            <i className="ti ti-user-circle" /> My profile
           </button>
         </div>
       </section>
 
-      <section style={styles.statsGrid}>
+      <section style={styles.statGrid}>
         {stats.map((stat) => (
-          <div key={stat.label} style={styles.statCard}>
-            <div style={{ ...styles.statIcon, background: stat.bg, color: stat.color }}>
-              <i className={`ti ${stat.icon}`} />
-            </div>
-            <div>
-              <strong style={styles.statValue}>{loading ? "..." : stat.value}</strong>
-              <div style={styles.statLabel}>{stat.label}</div>
-              <div style={styles.statHint}>{stat.hint}</div>
-            </div>
-          </div>
+          <StatCard key={stat.label} stat={stat} loading={loading} />
         ))}
       </section>
 
-      <section style={styles.mainGrid}>
-        <div style={styles.card}>
+      <section style={styles.grid}>
+        <article style={{ ...styles.card, gridColumn: "span 2" }}>
           <div style={styles.cardHeader}>
             <div>
-              <h2 style={styles.cardTitle}>Recent patients</h2>
-              <p style={styles.cardSub}>Open a patient record or add a new patient from here.</p>
+              <h2 style={styles.cardTitle}>Today's appointments</h2>
+              <p style={styles.cardCopy}>Only today’s doctor schedule is shown here for a cleaner start-of-day view.</p>
             </div>
-            <button style={styles.softBtn} onClick={() => navigate(`${routePrefix()}/patients`)}><i className="ti ti-users" /> All patients</button>
+            <button style={styles.linkBtn} onClick={() => navigate(`${routePrefix()}/appointments`)}>
+              Full appointment desk
+            </button>
           </div>
-
-          <div style={styles.queueList}>
-            {recentPatients.length === 0 ? (
-              <div style={styles.empty}>No patients yet.</div>
-            ) : (
-              recentPatients.map((patient, index) => (
-                <div key={patient.id || index} style={styles.queueRow}>
-                  <div style={styles.token}>P{String(index + 1).padStart(2, "0")}</div>
-                  <div style={styles.queueInfo}>
-                    <strong>{patient.name || "Patient"}</strong>
-                    <span>{patient.phone} - {patient.condition || "No condition set"}</span>
+          {loading ? (
+            <div style={styles.emptyState}>Loading today’s appointments...</div>
+          ) : appointments.length === 0 ? (
+            <EmptyCard
+              icon="ti-calendar-off"
+              title="No appointments booked for today"
+              copy="Use the appointments desk to add a walk-in patient or create a booking."
+              actionLabel="Open appointments"
+              onAction={() => navigate(`${routePrefix()}/appointments`)}
+            />
+          ) : (
+            <div style={styles.appointmentList}>
+              {appointments.map((appointment, index) => (
+                <button key={appointment.id} style={styles.appointmentRow} onClick={() => navigate(`${routePrefix()}/appointments`)}>
+                  <div style={styles.appointmentToken}>#{String(index + 1).padStart(2, "0")}</div>
+                  <div style={styles.appointmentBody}>
+                    <strong>{appointment.patient_name}</strong>
+                    <span>{appointment.service_type || "Consultation"} · {appointment.appointment_time || "Queue"}</span>
                   </div>
-                  <Status status="active" />
-                  <button style={styles.rowBtn} onClick={() => navigate(`${routePrefix()}/patients/${patient.id}`)}>
-                    Open OP
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <aside style={styles.sideStack}>
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h2 style={styles.cardTitle}>This week</h2>
-              <span style={styles.cardSub}>{weekData.reduce((sum, item) => sum + item, 0)} total</span>
+                  <StatusPill status={appointment.status || "booked"} />
+                </button>
+              ))}
             </div>
-            <div style={styles.chart}>
-              {weekData.map((value, index) => (
-                <div key={index} style={styles.barCol}>
-                  <span style={styles.barValue}>{value}</span>
-                  <div style={styles.barWrap}>
-                    <div style={{ ...styles.barFill, height: `${Math.max((value / maxWeek) * 100, 6)}%` }} />
+          )}
+        </article>
+
+        <article style={styles.card}>
+          <div style={styles.cardHeader}>
+            <div>
+              <h2 style={styles.cardTitle}>Recovery watchlist</h2>
+              <p style={styles.cardCopy}>Patients whose reminders failed and may need manual attention.</p>
+            </div>
+            <button style={styles.linkBtn} onClick={() => navigate(`${routePrefix()}/recovery`)}>
+              Open recovery
+            </button>
+          </div>
+          {failedPatients.length === 0 ? (
+            <div style={styles.emptyCompact}>No failed reminders right now.</div>
+          ) : (
+            <div style={styles.stack}>
+              {failedPatients.map(([log, patient]) => (
+                <div key={log?.id} style={styles.personRow}>
+                  <div style={styles.avatar}>{initials(patient?.name)}</div>
+                  <div style={styles.personBody}>
+                    <strong>{patient?.name || "Patient"}</strong>
+                    <span>{log?.reminder_type?.replaceAll("_", " ") || "Reminder"} failed</span>
                   </div>
-                  <span style={styles.barDay}>{["M", "T", "W", "T", "F", "S", "S"][index]}</span>
+                  <span style={styles.alertBadge}>Needs call</span>
                 </div>
               ))}
             </div>
-          </div>
+          )}
+        </article>
 
-          <div style={styles.card}>
-            <div style={styles.cardHeader}>
-              <h2 style={styles.cardTitle}>Recovery alerts</h2>
-              <button style={styles.linkBtn} onClick={() => navigate(`${routePrefix()}/recovery`)}>View all</button>
+        <article style={styles.card}>
+          <div style={styles.cardHeader}>
+            <div>
+              <h2 style={styles.cardTitle}>Care preferences</h2>
+              <p style={styles.cardCopy}>Reminder controls and follow-up readiness for your clinic.</p>
             </div>
-            {atRisk.length === 0 ? (
-              <div style={styles.emptySmall}>No opted-out patients. Nice and quiet.</div>
-            ) : (
-              atRisk.map((patient) => (
-                <div key={patient.id} style={styles.alertRow}>
-                  <div style={styles.avatar}>{patient.name?.[0] || "P"}</div>
-                  <div style={styles.queueInfo}>
-                    <strong>{patient.name}</strong>
-                    <span>{patient.condition || "Follow-up"} - opted out</span>
-                  </div>
-                  <a style={styles.whatsappBtn} href={`https://wa.me/91${patient.phone}`} target="_blank" rel="noreferrer">
-                    WhatsApp
-                  </a>
-                </div>
-              ))
-            )}
           </div>
+          <div style={styles.preferenceGrid}>
+            <PreferenceTile label="Reminders active" value={patients.length - reminderDisabled} tone="teal" />
+            <PreferenceTile label="Reminders paused" value={reminderDisabled} tone="amber" />
+          </div>
+          <div style={styles.preferenceNote}>
+            Patients with reminders paused or follow-up disabled stay out of the automated reminder flow.
+          </div>
+        </article>
 
-          <div style={styles.card}>
-            <h2 style={{ ...styles.cardTitle, marginBottom: 12 }}>Recent patients</h2>
-            {recentPatients.map((patient) => (
-              <button key={patient.id} style={styles.recentRow} onClick={() => navigate(`${routePrefix()}/patients/${patient.id}`)}>
-                <div style={styles.avatar}>{patient.name?.[0] || "P"}</div>
-                <div style={styles.queueInfo}>
-                  <strong>{patient.name}</strong>
-                  <span>{patient.phone} - {patient.condition || "No condition"}</span>
-                </div>
-                <i className="ti ti-chevron-right" />
-              </button>
-            ))}
+        <article style={{ ...styles.card, gridColumn: "span 2" }}>
+          <div style={styles.cardHeader}>
+            <div>
+              <h2 style={styles.cardTitle}>Care timeline</h2>
+              <p style={styles.cardCopy}>A quick doctor-side view of patients still in active follow-up.</p>
+            </div>
           </div>
-        </aside>
+          {upcomingPatients.length === 0 ? (
+            <div style={styles.emptyCompact}>No active follow-up patients yet.</div>
+          ) : (
+            <div style={styles.timeline}>
+              {upcomingPatients.map((patient) => (
+                <div key={patient.id} style={styles.timelineRow}>
+                  <div style={styles.timelineDot} />
+                  <div style={styles.timelineCard}>
+                    <strong>{patient.name}</strong>
+                    <span>{patient.followup_type || patient.condition || "Follow-up care"} · {patient.mrn || `DN${patient.id}`}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+
+        <article style={styles.card}>
+          <div style={styles.cardHeader}>
+            <div>
+              <h2 style={styles.cardTitle}>Doctor profile</h2>
+              <p style={styles.cardCopy}>Keep your name, clinic identity, and specialty accurate everywhere.</p>
+            </div>
+          </div>
+          <div style={styles.profileBlock}>
+            <div style={styles.profileTop}>
+              <div style={styles.profileAvatar}>{initials(doctorName)}</div>
+              <div>
+                <strong style={styles.profileName}>Dr. {doctorName}</strong>
+                <div style={styles.profileSub}>{clinic?.name || "Clinic"} · {designation}</div>
+              </div>
+            </div>
+            <button style={styles.secondaryBtn} onClick={() => navigate(`${routePrefix()}/settings?tab=profile`)}>
+              <i className="ti ti-settings" /> Edit profile and password
+            </button>
+          </div>
+        </article>
       </section>
     </div>
   );
 }
 
-function Status({ status }) {
-  const normalized = status || "upcoming";
+function StatCard({ stat, loading }) {
+  const palette = {
+    blue: ["#eaf3ff", "#0c447c"],
+    teal: ["#e5fbf7", "#0d9488"],
+    green: ["#eef9eb", "#2f7a32"],
+    amber: ["#fff4e8", "#b45309"],
+  }[stat.tone];
+
+  return (
+    <article style={styles.statCard}>
+      <div style={{ ...styles.statIcon, background: palette[0], color: palette[1] }}>
+        <i className={`ti ${stat.icon}`} />
+      </div>
+      <div>
+        <strong style={styles.statValue}>{loading ? "..." : stat.value}</strong>
+        <div style={styles.statLabel}>{stat.label}</div>
+        <div style={styles.statHint}>{stat.hint}</div>
+      </div>
+    </article>
+  );
+}
+
+function StatusPill({ status }) {
+  const normalized = String(status || "booked").toLowerCase();
   const palette = normalized === "completed"
-    ? ["#EAF3DE", "#3B6D11"]
-    : normalized === "missed"
-      ? ["#FAECE7", "#712B13"]
-      : ["#E6F1FB", "#0C447C"];
-  return <span style={{ ...styles.status, background: palette[0], color: palette[1] }}>{normalized}</span>;
+    ? ["#eef4ff", "#3659a2"]
+    : normalized === "cancelled"
+      ? ["#fff0ef", "#b83b2e"]
+      : ["#e5fbf7", "#0d9488"];
+  return <span style={{ ...styles.statusPill, background: palette[0], color: palette[1] }}>{normalized}</span>;
+}
+
+function PreferenceTile({ label, value, tone }) {
+  const palette = {
+    teal: ["#e5fbf7", "#0d9488"],
+    amber: ["#fff4e8", "#b45309"],
+  }[tone];
+  return (
+    <div style={{ ...styles.preferenceTile, background: palette[0] }}>
+      <strong style={{ color: palette[1] }}>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EmptyCard({ icon, title, copy, actionLabel, onAction }) {
+  return (
+    <div style={styles.emptyRich}>
+      <div style={styles.emptyIcon}><i className={`ti ${icon}`} /></div>
+      <strong>{title}</strong>
+      <span>{copy}</span>
+      {actionLabel && <button style={styles.primaryBtn} onClick={onAction}>{actionLabel}</button>}
+    </div>
+  );
 }
 
 const styles = {
-  page: { padding: "28px 32px", fontFamily: "'DM Sans', sans-serif", color: "#1a1a18" },
-  hero: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, padding: 22, background: "linear-gradient(135deg,#fff,#F1FBF7)", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 14, marginBottom: 16 },
-  eyebrow: { fontSize: 13, color: "#0F6E56", fontWeight: 600, marginBottom: 4 },
-  title: { margin: 0, fontSize: 26, lineHeight: 1.1, fontWeight: 700 },
-  sub: { margin: "6px 0 0", fontSize: 13, color: "#888" },
-  heroActions: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  openBadge: { display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 20, background: "#fff", border: "0.5px solid #9FE1CB", color: "#085041", fontSize: 12, fontWeight: 600 },
-  openDot: { width: 8, height: 8, borderRadius: "50%", background: "#1D9E75" },
-  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 14px", borderRadius: 9, border: "none", background: "#1D9E75", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" },
-  softBtn: { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, border: "0.5px solid rgba(0,0,0,0.12)", background: "#fff", color: "#555", fontSize: 12, cursor: "pointer" },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 12, marginBottom: 16 },
-  statCard: { display: "flex", alignItems: "center", gap: 13, padding: 16, background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 12 },
-  statIcon: { width: 42, height: 42, borderRadius: 11, display: "grid", placeItems: "center", fontSize: 20, flexShrink: 0 },
-  statValue: { display: "block", fontSize: 22, lineHeight: 1, marginBottom: 4 },
-  statLabel: { fontSize: 12, color: "#555", fontWeight: 600 },
-  statHint: { fontSize: 11, color: "#aaa", marginTop: 2 },
-  mainGrid: { display: "grid", gridTemplateColumns: "minmax(0,1fr) 360px", gap: 16 },
-  sideStack: { display: "flex", flexDirection: "column", gap: 16 },
-  card: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 12, padding: 16 },
-  cardHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 14 },
-  cardTitle: { margin: 0, fontSize: 16, fontWeight: 700 },
-  cardSub: { margin: "3px 0 0", fontSize: 12, color: "#aaa" },
-  tabs: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 },
-  tab: { padding: "6px 10px", borderRadius: 20, border: "0.5px solid rgba(0,0,0,0.08)", background: "#f8f7f4", color: "#777", fontSize: 12, textTransform: "capitalize", cursor: "pointer" },
-  tabActive: { background: "#E1F5EE", color: "#085041", borderColor: "#9FE1CB", fontWeight: 600 },
-  queueList: { display: "flex", flexDirection: "column" },
-  queueRow: { display: "grid", gridTemplateColumns: "52px minmax(0,1fr) auto auto", alignItems: "center", gap: 12, padding: "12px 0", borderTop: "0.5px solid rgba(0,0,0,0.06)" },
-  token: { width: 42, height: 32, borderRadius: 9, background: "#f1f0ed", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, color: "#555" },
-  queueInfo: { minWidth: 0 },
-  status: { borderRadius: 20, padding: "4px 9px", fontSize: 11, textTransform: "capitalize", whiteSpace: "nowrap" },
-  rowBtn: { padding: "7px 10px", borderRadius: 8, border: "0.5px solid #1D9E75", background: "transparent", color: "#1D9E75", fontSize: 12, cursor: "pointer" },
-  empty: { padding: 36, color: "#aaa", textAlign: "center", fontSize: 13 },
-  emptySmall: { padding: "10px 0", color: "#aaa", fontSize: 13 },
-  chart: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8, height: 180, alignItems: "end" },
-  barCol: { height: "100%", display: "grid", gridTemplateRows: "22px 1fr 18px", alignItems: "end", textAlign: "center" },
-  barValue: { fontSize: 11, color: "#888" },
-  barWrap: { height: "100%", borderRadius: 999, background: "#f1f0ed", overflow: "hidden", display: "flex", alignItems: "end" },
-  barFill: { width: "100%", background: "linear-gradient(180deg,#1D9E75,#8FD9C1)", borderRadius: 999 },
-  barDay: { fontSize: 11, color: "#aaa", marginTop: 5 },
-  linkBtn: { color: "#1D9E75", background: "transparent", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600 },
-  alertRow: { display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "0.5px solid rgba(0,0,0,0.06)" },
-  avatar: { width: 34, height: 34, borderRadius: "50%", background: "#E1F5EE", color: "#0F6E56", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 },
-  whatsappBtn: { padding: "5px 8px", borderRadius: 7, border: "0.5px solid #9FE1CB", color: "#085041", fontSize: 11, textDecoration: "none" },
-  recentRow: { width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 0", border: "none", borderTop: "0.5px solid rgba(0,0,0,0.06)", background: "transparent", textAlign: "left", cursor: "pointer", color: "#444" },
+  page: { padding: "28px 30px 38px", minHeight: "100vh", background: "radial-gradient(circle at top left,#eff8ff 0%,#f7fbff 35%,#f8f6f0 100%)", fontFamily: "'DM Sans', sans-serif", color: "#11243a" },
+  hero: { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", padding: "24px 26px", borderRadius: 28, background: "linear-gradient(135deg,rgba(12,68,124,0.97),rgba(13,148,136,0.92))", color: "#fff", boxShadow: "0 26px 60px rgba(12,68,124,0.24)", marginBottom: 18 },
+  eyebrow: { fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", opacity: 0.72, fontWeight: 700, marginBottom: 8 },
+  heroTitle: { margin: 0, fontSize: 30, lineHeight: 1.08, fontWeight: 800 },
+  heroCopy: { margin: "8px 0 0", fontSize: 14, opacity: 0.86 },
+  heroActions: { display: "flex", gap: 10, flexWrap: "wrap" },
+  primaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "none", background: "#fff", color: "#0c447c", fontWeight: 800, cursor: "pointer", boxShadow: "0 12px 24px rgba(15,23,42,0.12)" },
+  secondaryBtn: { display: "inline-flex", alignItems: "center", gap: 8, padding: "11px 16px", borderRadius: 14, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.12)", color: "#fff", fontWeight: 700, cursor: "pointer" },
+  statGrid: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 18 },
+  statCard: { display: "flex", alignItems: "center", gap: 14, padding: 18, borderRadius: 22, background: "rgba(255,255,255,0.86)", border: "1px solid rgba(12,68,124,0.08)", backdropFilter: "blur(10px)", boxShadow: "0 18px 40px rgba(15,23,42,0.06)" },
+  statIcon: { width: 48, height: 48, borderRadius: 16, display: "grid", placeItems: "center", fontSize: 20, flexShrink: 0 },
+  statValue: { display: "block", fontSize: 28, lineHeight: 1, fontWeight: 800, color: "#11243a", marginBottom: 6 },
+  statLabel: { fontSize: 13, fontWeight: 700, color: "#3a5068" },
+  statHint: { fontSize: 12, color: "#708092", marginTop: 3 },
+  grid: { display: "grid", gridTemplateColumns: "minmax(0,1.2fr) minmax(0,0.8fr) minmax(280px,0.7fr)", gap: 16 },
+  card: { background: "rgba(255,255,255,0.9)", border: "1px solid rgba(12,68,124,0.08)", borderRadius: 24, padding: 20, boxShadow: "0 18px 40px rgba(15,23,42,0.06)", backdropFilter: "blur(10px)" },
+  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 },
+  cardTitle: { margin: 0, fontSize: 18, fontWeight: 800, color: "#11243a" },
+  cardCopy: { margin: "5px 0 0", fontSize: 13, color: "#708092", lineHeight: 1.6 },
+  linkBtn: { border: "none", background: "transparent", color: "#0d9488", fontWeight: 700, cursor: "pointer" },
+  appointmentList: { display: "flex", flexDirection: "column", gap: 10 },
+  appointmentRow: { width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 18, border: "1px solid rgba(12,68,124,0.08)", background: "#fbfdff", cursor: "pointer", textAlign: "left" },
+  appointmentToken: { minWidth: 48, height: 40, borderRadius: 14, display: "grid", placeItems: "center", background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", fontWeight: 800, fontSize: 13 },
+  appointmentBody: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
+  statusPill: { padding: "6px 11px", borderRadius: 999, textTransform: "capitalize", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" },
+  emptyState: { padding: "42px 0", textAlign: "center", color: "#708092" },
+  emptyCompact: { padding: "18px 0 8px", color: "#708092", fontSize: 13 },
+  emptyRich: { minHeight: 240, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", gap: 10, color: "#708092" },
+  emptyIcon: { width: 56, height: 56, borderRadius: 18, display: "grid", placeItems: "center", background: "#eef5fb", color: "#0c447c", fontSize: 24 },
+  stack: { display: "flex", flexDirection: "column", gap: 10 },
+  personRow: { display: "flex", alignItems: "center", gap: 12, padding: "12px 0", borderTop: "1px solid rgba(12,68,124,0.06)" },
+  avatar: { width: 40, height: 40, borderRadius: 14, background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, flexShrink: 0 },
+  personBody: { display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 },
+  alertBadge: { padding: "6px 10px", borderRadius: 999, background: "#fff4e8", color: "#b45309", fontWeight: 800, fontSize: 11, whiteSpace: "nowrap" },
+  preferenceGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 },
+  preferenceTile: { borderRadius: 18, padding: 16, display: "grid", gap: 6 },
+  preferenceNote: { fontSize: 12, color: "#708092", lineHeight: 1.7 },
+  timeline: { display: "flex", flexDirection: "column", gap: 12 },
+  timelineRow: { display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 12 },
+  timelineDot: { width: 12, height: 12, borderRadius: "50%", background: "#0d9488", boxShadow: "0 0 0 6px rgba(13,148,136,0.12)" },
+  timelineCard: { display: "flex", flexDirection: "column", gap: 4, padding: "14px 16px", borderRadius: 18, background: "#fbfdff", border: "1px solid rgba(12,68,124,0.08)" },
+  profileBlock: { display: "grid", gap: 14 },
+  profileTop: { display: "flex", alignItems: "center", gap: 12 },
+  profileAvatar: { width: 52, height: 52, borderRadius: 18, background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 17 },
+  profileName: { display: "block", fontSize: 16, color: "#11243a" },
+  profileSub: { marginTop: 4, fontSize: 13, color: "#708092" },
 };

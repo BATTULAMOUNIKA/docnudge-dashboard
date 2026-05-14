@@ -1,25 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api";
+import { FOLLOWUP_TYPES, getCommonOpdCases } from "../lib/clinicalOptions";
 
 function appPath(path) {
   return window.location.pathname.startsWith("/doctor") ? `/doctor${path}` : path;
 }
-
-const FOLLOWUP_TYPES = [
-  "General checkup",
-  "Diabetes follow-up",
-  "Hypertension follow-up",
-  "Thyroid follow-up",
-  "Cardiac follow-up",
-  "Orthopedic follow-up",
-  "Skin / Dermatology",
-  "ENT",
-  "Eye / Ophthalmology",
-  "Gynecology",
-  "Pediatrics",
-  "Other",
-];
 
 const GENDERS = ["Male", "Female", "Other"];
 
@@ -38,24 +24,26 @@ function normalizePhone(value) {
   return digits;
 }
 
-export default function AddPatient({ clinicId }) {
+export default function AddPatient({ clinicId, user }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const commonCases = getCommonOpdCases(user?.designation);
   const [patient, setPatient] = useState({
     name: "",
     phone: "",
     age: "",
     gender: "Male",
-    condition: "",
-    followup_type: "General checkup",
+    condition: commonCases[0] || "",
+    followup_type: FOLLOWUP_TYPES[0] || "General checkup",
+    reminder_enabled: true,
+    followup_enabled: true,
   });
   const [visit, setVisit] = useState({
     visit_date: localDateString(),
     next_visit: "",
     notes: "",
-    add_to_queue: false,
   });
 
   function validateStep1() {
@@ -102,7 +90,7 @@ export default function AddPatient({ clinicId }) {
       await API.post("/visits", {
         patient_id: newPatient.id,
         visit_date: visit.visit_date,
-        next_visit: visit.next_visit || null,
+        next_visit: patient.followup_enabled ? visit.next_visit || null : null,
         notes: visit.notes,
         status: "completed",
       });
@@ -125,7 +113,7 @@ export default function AddPatient({ clinicId }) {
         </button>
         <div>
           <h1 style={styles.title}>Add new patient</h1>
-          <p style={styles.sub}>Step {step} of 2 - {step === 1 ? "Patient details" : "Visit details"}</p>
+          <p style={styles.sub}>Step {step} of 2 - {step === 1 ? "Patient details" : "Visit details"} · {user?.designation || "Doctor workflow"}</p>
         </div>
       </div>
 
@@ -188,11 +176,15 @@ export default function AddPatient({ clinicId }) {
             </div>
 
             <Field label="Condition / chief complaint">
-              <Input
+              <select
+                style={styles.input}
                 value={patient.condition}
-                onChange={(value) => setPatientField("condition", value)}
-                placeholder="e.g. Diabetes, Hypertension, Fever"
-              />
+                onChange={(event) => setPatientField("condition", event.target.value)}
+              >
+                {commonCases.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
             </Field>
 
             <Field label="Follow-up type">
@@ -206,6 +198,26 @@ export default function AddPatient({ clinicId }) {
                 ))}
               </select>
             </Field>
+
+            <div style={styles.preferenceRow}>
+              <PreferenceToggle
+                title="Needs follow-up"
+                copy="Track this patient in future follow-up care."
+                enabled={patient.followup_enabled}
+                onToggle={(enabled) => setPatient((current) => ({
+                  ...current,
+                  followup_enabled: enabled,
+                  reminder_enabled: enabled ? current.reminder_enabled : false,
+                }))}
+              />
+              <PreferenceToggle
+                title="Send reminders"
+                copy="Allow DocNudge to send reminder messages for this patient."
+                enabled={patient.reminder_enabled}
+                disabled={!patient.followup_enabled}
+                onToggle={(enabled) => setPatientField("reminder_enabled", enabled)}
+              />
+            </div>
 
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
               <button style={styles.btnPrimary} onClick={() => validateStep1() && setStep(2)}>
@@ -222,7 +234,7 @@ export default function AddPatient({ clinicId }) {
                 <Input type="date" value={visit.visit_date} onChange={(value) => setVisitField("visit_date", value)} />
               </Field>
               <Field label="Next visit date (optional)">
-                <Input type="date" value={visit.next_visit} onChange={(value) => setVisitField("next_visit", value)} />
+                <Input type="date" value={visit.next_visit} onChange={(value) => setVisitField("next_visit", value)} disabled={!patient.followup_enabled} />
               </Field>
             </div>
 
@@ -297,6 +309,29 @@ function Input({ value, onChange, ...props }) {
   return <input style={styles.input} value={value} onChange={(event) => onChange?.(event.target.value)} {...props} />;
 }
 
+function PreferenceToggle({ title, copy, enabled, disabled = false, onToggle }) {
+  return (
+    <button
+      type="button"
+      style={{
+        ...styles.preferenceCard,
+        opacity: disabled ? 0.55 : 1,
+        borderColor: enabled ? "#0d9488" : "rgba(12,68,124,0.12)",
+        background: enabled ? "#edfdfa" : "#fff",
+      }}
+      onClick={() => !disabled && onToggle?.(!enabled)}
+    >
+      <div>
+        <strong style={styles.preferenceTitle}>{title}</strong>
+        <div style={styles.preferenceCopy}>{copy}</div>
+      </div>
+      <div style={{ ...styles.toggle, background: enabled ? "#0d9488" : "#d7dee7" }}>
+        <div style={{ ...styles.toggleKnob, transform: enabled ? "translateX(18px)" : "translateX(0)" }} />
+      </div>
+    </button>
+  );
+}
+
 const styles = {
   page: {
     padding: "28px 32px",
@@ -336,6 +371,10 @@ const styles = {
     borderRadius: 12,
     padding: "24px 28px",
   },
+  preferenceRow: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 6 },
+  preferenceCard: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 15px", borderRadius: 12, border: "1px solid", background: "#fff", cursor: "pointer", textAlign: "left" },
+  preferenceTitle: { display: "block", fontSize: 13, color: "#1a1a18", marginBottom: 4 },
+  preferenceCopy: { fontSize: 12, color: "#6b7280", lineHeight: 1.5 },
   sectionTitle: { fontSize: 15, fontWeight: 600, color: "#1a1a18", marginBottom: 20 },
   row2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
   label: { fontSize: 12, color: "#888", marginBottom: 6, display: "block" },

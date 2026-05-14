@@ -8,6 +8,7 @@ import {
   checkDrugInteractions,
 } from "../agents/prescriptionAgents";
 import { addPrescription, updatePrescription } from "../api";
+import { getFrequencyOptions } from "../lib/clinicalOptions";
 
 export default function AIPrescriptionModal({ patient, visits, patientId, prescription, onClose, onSave }) {
   const [activeAgent, setActiveAgent] = useState("voice");
@@ -694,11 +695,17 @@ function LabAnalysisOutput({ analysis }) {
 }
 
 function MedicineRow({ medicine, onChange, onRemove }) {
+  const frequencyOptions = getFrequencyOptions(medicine.frequency);
   return (
     <>
       <input style={styles.input} value={medicine.name} onChange={(event) => onChange("name", event.target.value)} placeholder="Paracetamol 500mg" />
       <input style={styles.input} value={medicine.dosage} onChange={(event) => onChange("dosage", event.target.value)} placeholder="500 mg" />
-      <input style={styles.input} value={medicine.frequency} onChange={(event) => onChange("frequency", event.target.value)} placeholder="BD" />
+      <select style={styles.input} value={medicine.frequency} onChange={(event) => onChange("frequency", event.target.value)}>
+        <option value="">Select</option>
+        {frequencyOptions.map((item) => (
+          <option key={item} value={item}>{item}</option>
+        ))}
+      </select>
       <input style={styles.input} value={medicine.duration} onChange={(event) => onChange("duration", event.target.value)} placeholder="5 days" />
       <button style={styles.removeBtn} onClick={onRemove}>
         <i className="ti ti-x" style={{ fontSize: 12 }} />

@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { updatePatientRecord, deletePatientRecord } from "../api";
+import { FOLLOWUP_TYPES, getCommonOpdCases } from "../lib/clinicalOptions";
 
 function appPath(path) {
   return window.location.pathname.startsWith("/doctor") ? `/doctor${path}` : path;
 }
 
-export default function Patients({ clinicId }) {
+export default function Patients({ clinicId, user }) {
   const navigate = useNavigate();
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +50,7 @@ export default function Patients({ clinicId }) {
       if (
         query &&
         !patient.name?.toLowerCase().includes(query) &&
+        !patient.mrn?.toLowerCase().includes(query) &&
         !patient.phone?.includes(query) &&
         !patient.condition?.toLowerCase().includes(query) &&
         !patient.followup_type?.toLowerCase().includes(query)
@@ -88,6 +90,8 @@ export default function Patients({ clinicId }) {
       condition: payload.condition || null,
       followup_type: payload.followup_type || null,
       preferred_language: payload.preferred_language || "en",
+      reminder_enabled: Boolean(payload.reminder_enabled),
+      followup_enabled: Boolean(payload.followup_enabled),
     });
     setPatients((current) => current.map((patient) => (patient.id === payload.id ? response.data : patient)));
     setEditingPatient(null);
@@ -102,6 +106,8 @@ export default function Patients({ clinicId }) {
   const hasFilter = search || filterDate || filterMonth || filterYear;
   const activeCount = patients.filter((patient) => !["inactive", "archived"].includes(String(patient.status || "active").toLowerCase())).length;
   const archivedCount = patients.length - activeCount;
+  const reminderPausedCount = patients.filter((patient) => patient.reminder_enabled === false).length;
+  const followupEnabledCount = patients.filter((patient) => patient.followup_enabled !== false).length;
   const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
   const pagedPatients = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   const years = [...new Set(patients.map((patient) => patient.created_at?.slice(0, 4)).filter(Boolean))].sort().reverse();
@@ -125,6 +131,7 @@ export default function Patients({ clinicId }) {
       {editingPatient && (
         <EditPatientModal
           patient={editingPatient}
+          commonCases={getCommonOpdCases(user?.designation)}
           onClose={() => setEditingPatient(null)}
           onSave={handleEditPatient}
         />
@@ -149,8 +156,8 @@ export default function Patients({ clinicId }) {
 
       <div style={styles.statsRow}>
         <PatientStat label="Total patients" value={patients.length} icon="ti-users" tone="blue" />
-        <PatientStat label="Active records" value={activeCount} icon="ti-user-check" tone="green" />
-        <PatientStat label="Archived" value={archivedCount} icon="ti-archive" tone="red" />
+        <PatientStat label="Follow-up enabled" value={followupEnabledCount} icon="ti-heart-rate-monitor" tone="green" />
+        <PatientStat label="Reminders paused" value={reminderPausedCount} icon="ti-bell-off" tone="red" />
         <PatientStat label="Showing" value={filtered.length} icon="ti-filter" tone="purple" />
       </div>
 
@@ -171,9 +178,6 @@ export default function Patients({ clinicId }) {
         </div>
 
         <button style={styles.bulkBtn}><i className="ti ti-upload" /> Bulk Upload</button>
-        <button style={styles.btnPrimary} onClick={() => navigate(appPath("/patients/add"))}>
-          <i className="ti ti-circle-plus" style={{ fontSize: 18 }} /> Add New Patient
-        </button>
 
         {hasFilter && (
           <button style={styles.clearBtn} onClick={clearFilters}>
@@ -239,10 +243,10 @@ export default function Patients({ clinicId }) {
                   onClick={() => navigate(appPath(`/patients/${patient.id}`))}
                 >
                   <td style={styles.td}>
-                    <span style={styles.mrn}>MRN{String(6030000000 + Number(patient.id || 0)).padStart(10, "0")}</span>
+                    <span style={styles.mrn}>{patient.mrn || `DN${String(patient.id || 0).padStart(6, "0")}`}</span>
                   </td>
                   <td style={{ ...styles.td, color: "#2f3542", fontWeight: 600 }}>{patient.name}</td>
-                  <td style={styles.td}>Dr {patient.doctor_name || "DocNudge"}</td>
+                  <td style={styles.td}>Dr {patient.doctor_name || user?.doctor_name || "Doctor"}</td>
                   <td style={styles.td}>{patient.phone}</td>
                   <td style={styles.td}>{patient.age || "-"}</td>
                   <td style={styles.td}>
@@ -360,13 +364,15 @@ function Chip({ label, onRemove }) {
   );
 }
 
-function EditPatientModal({ patient, onClose, onSave }) {
+function EditPatientModal({ patient, commonCases, onClose, onSave }) {
   const [form, setForm] = useState({
     ...patient,
     age: patient.age || "",
     gender: patient.gender || "",
     condition: patient.condition || "",
     followup_type: patient.followup_type || "",
+    reminder_enabled: patient.reminder_enabled !== false,
+    followup_enabled: patient.followup_enabled !== false,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -414,7 +420,43 @@ function EditPatientModal({ patient, onClose, onSave }) {
             </select>
           </Field>
           <Field label="Condition"><input style={styles.input} value={form.condition || ""} onChange={(event) => setField("condition", event.target.value)} /></Field>
-          <Field label="Follow-up type"><input style={styles.input} value={form.followup_type || ""} onChange={(event) => setField("followup_type", event.target.value)} /></Field>
+          <Field label="Follow-up type">
+            <select style={styles.input} value={form.followup_type || ""} onChange={(event) => setField("followup_type", event.target.value)}>
+              <option value="">Not set</option>
+              {FOLLOWUP_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </Field>
+          <Field label="Common OPD case">
+            <select style={styles.input} value={form.condition || ""} onChange={(event) => setField("condition", event.target.value)}>
+              <option value="">Select case</option>
+              {commonCases.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </Field>
+          <Field label="Follow-up needed">
+            <select
+              style={styles.input}
+              value={form.followup_enabled ? "yes" : "no"}
+              onChange={(event) => {
+                const enabled = event.target.value === "yes";
+                setField("followup_enabled", enabled);
+                if (!enabled) setField("reminder_enabled", false);
+              }}
+            >
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </Field>
+          <Field label="Reminder preference">
+            <select
+              style={styles.input}
+              value={form.reminder_enabled ? "yes" : "no"}
+              onChange={(event) => setField("reminder_enabled", event.target.value === "yes")}
+              disabled={!form.followup_enabled}
+            >
+              <option value="yes">Send reminders</option>
+              <option value="no">Do not send</option>
+            </select>
+          </Field>
         </div>
         {error && <div style={styles.modalError}>{error}</div>}
         <div style={styles.modalFooter}>
