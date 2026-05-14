@@ -14,7 +14,7 @@ const BOTTOM_NAV = [
   { to: "/settings", icon: "ti-settings", label: "Settings" },
 ];
 
-export default function Sidebar({ user, basePath = "" }) {
+export default function Sidebar({ user, basePath = "", showAdminNav = true }) {
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const doctorWorkspace = Boolean(basePath);
@@ -37,7 +37,7 @@ export default function Sidebar({ user, basePath = "" }) {
 
         <div style={styles.divider} />
 
-        {!doctorWorkspace && BOTTOM_NAV.map((item) => (item.adminOnly && !isAdmin ? null : <NavItem key={item.to} {...item} basePath={basePath} />))}
+        {!doctorWorkspace && showAdminNav && BOTTOM_NAV.map((item) => (item.adminOnly && !isAdmin ? null : <NavItem key={item.to} {...item} basePath={basePath} />))}
       </nav>
 
       <div style={styles.footer}>

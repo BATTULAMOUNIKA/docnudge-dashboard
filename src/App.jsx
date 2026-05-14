@@ -63,19 +63,7 @@ export default function App() {
           <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/dashboard" replace />} />
           <Route
             path="/*"
-            element={
-              !user ? (
-                <Navigate to="/login" replace />
-              ) : user.role === "admin" ? (
-                <DomainRedirect
-                  target="https://admin.docnudge.in"
-                  title="Redirecting to admin workspace"
-                  copy="This account belongs in the dedicated admin app."
-                />
-              ) : (
-                <DoctorWorkspace user={user} clinicId={resolvedClinicId} />
-              )
-            }
+            element={!user ? <Navigate to="/login" replace /> : <DoctorWorkspace user={user} clinicId={resolvedClinicId} />}
           />
         </Routes>
       </AppErrorBoundary>
@@ -86,7 +74,7 @@ export default function App() {
 function DoctorWorkspace({ user, clinicId }) {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#f8f7f4", fontFamily: "'DM Sans', sans-serif" }}>
-      <Sidebar user={user} />
+      <Sidebar user={user} showAdminNav={false} />
       <main style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
         <Routes>
           <Route path="/dashboard" element={<Dashboard clinicId={clinicId} />} />
@@ -104,21 +92,6 @@ function DoctorWorkspace({ user, clinicId }) {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
-    </div>
-  );
-}
-
-function DomainRedirect({ target, title, copy }) {
-  useEffect(() => {
-    window.location.replace(target);
-  }, [target]);
-
-  return (
-    <div style={loadingStyles.page}>
-      <div style={loadingStyles.card}>
-        <div style={loadingStyles.title}>{title}</div>
-        <div style={loadingStyles.copy}>{copy}</div>
-      </div>
     </div>
   );
 }
