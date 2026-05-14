@@ -97,12 +97,6 @@ export default function Reminders({ clinicId }) {
         </div>
       </section>
 
-      <section style={styles.scheduleGrid}>
-        <ScheduleCard time="10:00 AM" label="2 days before visit" />
-        <ScheduleCard time="6:00 PM" label="Day before visit" />
-        <ScheduleCard time="8:00 AM" label="Morning of visit" />
-      </section>
-
       <section style={styles.statGrid}>
         {stats.map((stat) => <StatCard key={stat.label} stat={stat} />)}
       </section>
@@ -111,7 +105,7 @@ export default function Reminders({ clinicId }) {
         <div style={styles.cardHeader}>
           <div>
             <h2 style={styles.cardTitle}>Reminder views</h2>
-            <p style={styles.cardCopy}>Switch between upcoming reminders, successful sends, and failures without leaving the page.</p>
+            <p style={styles.cardCopy}>Upcoming shows patients who need a reminder. Sent shows who already received one. Failed shows delivery errors.</p>
           </div>
           <button style={styles.refreshBtn} onClick={loadAll}><i className="ti ti-refresh" /> Refresh</button>
         </div>

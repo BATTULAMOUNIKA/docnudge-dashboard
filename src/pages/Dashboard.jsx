@@ -75,14 +75,34 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
     .filter((patient) => patient.last_visit_at || patient.created_at)
     .slice(0, 5);
 
+  // Returning patient names — anyone with a recorded last visit
+  const returningNames = useMemo(() => {
+    const names = new Set();
+    patients.forEach((p) => { if (p.last_visit_at) names.add((p.name || "").toLowerCase().trim()); });
+    return names;
+  }, [patients]);
+
+  // Active (non-completed, non-cancelled) appointments, deduplicated by name+time
+  const activeAppointments = useMemo(() => {
+    const seen = new Set();
+    return appointments.filter((a) => {
+      const status = (a.status || "").toLowerCase();
+      if (status === "completed" || status === "cancelled") return false;
+      const key = `${(a.patient_name || "").toLowerCase().trim()}-${a.appointment_time}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [appointments]);
+
   const stats = useMemo(
     () => [
       { label: "Total patients", value: patients.length, hint: "Visible patient records", icon: "ti-users", tone: "blue" },
-      { label: "Today's appointments", value: appointments.length, hint: "Open consultation desk", icon: "ti-calendar-event", tone: "teal" },
+      { label: "Today's appointments", value: activeAppointments.length, hint: "Open consultation desk", icon: "ti-calendar-event", tone: "teal" },
       { label: "Follow-up enabled", value: followupEnabled, hint: "Patients in care flow", icon: "ti-heart-rate-monitor", tone: "green" },
       { label: "Needs recovery", value: failedReminders.length, hint: "Reminder failures", icon: "ti-alert-triangle", tone: "amber" },
     ],
-    [appointments.length, failedReminders.length, followupEnabled, patients.length],
+    [activeAppointments.length, failedReminders.length, followupEnabled, patients.length],
   );
 
   return (
@@ -124,26 +144,32 @@ export default function Dashboard({ clinicId: initialClinicId, user }) {
           </div>
           {loading ? (
             <div style={styles.emptyState}>Loading today’s appointments...</div>
-          ) : appointments.length === 0 ? (
+          ) : activeAppointments.length === 0 ? (
             <EmptyCard
               icon="ti-calendar-off"
-              title="No appointments booked for today"
-              copy="Use the appointments desk to add a patient and start the consultation from there."
+              title="No active appointments for today"
+              copy="Completed and cancelled appointments are hidden. Use the appointments desk to add or view all."
               actionLabel="Open appointments"
               onAction={() => navigate(`${routePrefix()}/appointments`)}
             />
           ) : (
             <div style={styles.appointmentList}>
-              {appointments.map((appointment, index) => (
-                <button key={appointment.id} style={styles.appointmentRow} onClick={() => navigate(`${routePrefix()}/appointments`)}>
-                  <div style={styles.appointmentToken}>#{String(index + 1).padStart(2, "0")}</div>
-                  <div style={styles.appointmentBody}>
-                    <strong>{appointment.patient_name}</strong>
-                    <span>{appointment.service_type || "Consultation"} · {appointment.appointment_time || "Queue"}</span>
-                  </div>
-                  <StatusPill status={appointment.status || "booked"} />
-                </button>
-              ))}
+              {activeAppointments.map((appointment, index) => {
+                const isReturning = returningNames.has((appointment.patient_name || "").toLowerCase().trim());
+                return (
+                  <button key={appointment.id} style={styles.appointmentRow} onClick={() => navigate(`${routePrefix()}/appointments`)}>
+                    <div style={styles.appointmentToken}>#{String(index + 1).padStart(2, "0")}</div>
+                    <div style={styles.appointmentBody}>
+                      <strong>
+                        {appointment.patient_name}
+                        {isReturning && <span style={styles.returningBadge}>Returning</span>}
+                      </strong>
+                      <span>{appointment.service_type || "Consultation"} · {appointment.appointment_time || "Queue"}</span>
+                    </div>
+                    <StatusPill status={appointment.status || "booked"} />
+                  </button>
+                );
+              })}
             </div>
           )}
         </article>
@@ -249,6 +275,7 @@ const styles = {
   appointmentRow: { width: "100%", display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 18, border: "1px solid rgba(12,68,124,0.08)", background: "#fbfdff", cursor: "pointer", textAlign: "left" },
   appointmentToken: { minWidth: 48, height: 40, borderRadius: 14, display: "grid", placeItems: "center", background: "linear-gradient(135deg,#0c447c,#0d9488)", color: "#fff", fontWeight: 800, fontSize: 13 },
   appointmentBody: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
+  returningBadge: { marginLeft: 8, display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 999, background: "#fffbeb", color: "#b45309", fontSize: 11, fontWeight: 700, border: "1px solid #fde68a", verticalAlign: "middle" },
   statusPill: { padding: "6px 11px", borderRadius: 999, textTransform: "capitalize", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" },
   emptyState: { padding: "42px 0", textAlign: "center", color: "#708092" },
   emptyCompact: { padding: "18px 0 8px", color: "#708092", fontSize: 13 },

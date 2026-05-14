@@ -148,7 +148,9 @@ export default function OPSheet({ user }) {
   const clinicName = user?.clinic_name || "DocNudge Clinic";
   const doctorName = user?.doctor_name || user?.email?.split("@")[0] || "Doctor";
   const designation = user?.designation || "General Physician";
-  const sheetMarkup = buildSheetMarkup(buildSheetData({ patient, visits, prescriptions, labs, user }));
+  const visitCount = visits.length;
+  const visitOrdinal = visitCount === 1 ? "1st visit" : visitCount === 2 ? "2nd visit" : visitCount === 3 ? "3rd visit" : `${visitCount}th visit`;
+  // sheetMarkup is only built on-demand in handlePrintSheet — no live preview needed
 
   return (
     <div style={styles.page}>
@@ -243,15 +245,25 @@ export default function OPSheet({ user }) {
                   <Tag tone={latestVisit?.status === "missed" ? "amber" : "green"}>{labelizeStatus(latestVisit?.status || "upcoming")}</Tag>
                 </div>
               </div>
-              <div style={styles.summaryPill}>
-                <i className="ti ti-id-badge" style={{ fontSize: 13 }} />
-                ID {patient.id || patientId}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={styles.summaryPill}>
+                  <i className="ti ti-id-badge" style={{ fontSize: 13 }} />
+                  ID {patient.id || patientId}
+                </div>
+                {visitCount > 0 && (
+                  <div style={{ ...styles.summaryPill, background: visitCount > 1 ? "#fffbeb" : "#f0fdf4", color: visitCount > 1 ? "#b45309" : "#166534", borderColor: visitCount > 1 ? "#fde68a" : "#bbf7d0" }}>
+                    <i className="ti ti-repeat" style={{ fontSize: 13 }} />
+                    {visitOrdinal}
+                  </div>
+                )}
               </div>
             </div>
             <div style={styles.detailGrid}>
               <DetailItem label="Mobile" value={patient.phone || patient.mobile || "-"} />
               <DetailItem label="Gender" value={patient.gender || "-"} />
               <DetailItem label="Age" value={patient.age ? `${patient.age} years` : "-"} />
+              <DetailItem label="Last visit" value={formatDate(latestVisit?.visit_date) || "-"} />
+              <DetailItem label="Last prescription" value={latestPrescription ? formatDate(latestPrescription.created_at) : "None recorded"} />
               <DetailItem label="Next follow-up" value={formatDate(latestVisit?.next_visit) || "-"} />
               <DetailItem label="Address" value={patient.address || "Not recorded"} full />
             </div>
@@ -418,25 +430,6 @@ export default function OPSheet({ user }) {
           </SectionCard>
         </div>
 
-        <div style={styles.previewColumn}>
-          <div style={styles.previewCard}>
-            <div style={styles.previewHeader}>
-              <div>
-                <div style={styles.previewTitle}>
-                  <span style={styles.liveDot} />
-                  Record preview
-                </div>
-                <div style={styles.previewSub}>Updates from patient, visit, prescription, and lab records.</div>
-              </div>
-              <button style={styles.smallPreviewBtn} onClick={handlePrintSheet}>
-                <i className="ti ti-download" style={{ fontSize: 12 }} /> PDF / Print
-              </button>
-            </div>
-            <div style={styles.previewScroll}>
-              <div style={styles.previewSheet} dangerouslySetInnerHTML={{ __html: sheetMarkup }} />
-            </div>
-          </div>
-        </div>
       </div>
 
       {showVisit && (
@@ -1012,16 +1005,16 @@ const styles = {
     boxShadow: "0 14px 30px rgba(34, 197, 94, 0.25)",
   },
   hero: {
-    margin: "0 22px 16px",
-    padding: 22,
-    borderRadius: 26,
+    margin: "0 22px 12px",
+    padding: 16,
+    borderRadius: 22,
     background: "linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #22c55e 130%)",
     color: "#fff",
     display: "flex",
-    gap: 18,
+    gap: 14,
     justifyContent: "space-between",
     flexWrap: "wrap",
-    boxShadow: "0 24px 60px rgba(29, 78, 216, 0.18)",
+    boxShadow: "0 18px 40px rgba(29, 78, 216, 0.16)",
   },
   heroPrimary: { maxWidth: 760, minWidth: 260, flex: 1 },
   heroBadge: {
@@ -1034,7 +1027,7 @@ const styles = {
     letterSpacing: "0.04em",
     textTransform: "uppercase",
   },
-  heroHeading: { marginTop: 14, fontSize: 28, lineHeight: 1.15, fontWeight: 800, maxWidth: 780 },
+  heroHeading: { marginTop: 10, fontSize: 22, lineHeight: 1.15, fontWeight: 800, maxWidth: 780 },
   heroCopy: { marginTop: 10, fontSize: 14, lineHeight: 1.7, color: "rgba(255,255,255,0.86)", maxWidth: 720 },
   heroActions: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 },
   primaryAction: {
@@ -1109,13 +1102,12 @@ const styles = {
   modeLabel: { fontSize: 13, color: "#64748b" },
   body: {
     display: "flex",
-    gap: 18,
-    padding: "0 22px",
+    gap: 14,
+    padding: "0 18px",
     flexWrap: "wrap",
     alignItems: "flex-start",
   },
-  mainColumn: { flex: "1 1 760px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16 },
-  previewColumn: { flex: "0 1 420px", width: 420, minWidth: "min(100%, 320px)" },
+  mainColumn: { flex: "1 1 100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 },
   card: {
     background: "rgba(255,255,255,0.95)",
     border: "1px solid #dde7f3",
