@@ -178,20 +178,17 @@ export default function OPSheet({ user }) {
 
       <div style={styles.hero}>
         <div style={styles.heroPrimary}>
-          <div style={styles.heroBadge}>Patient workspace</div>
-          <div style={styles.heroHeading}>Patient consultation, prescription, and follow-up in one place.</div>
-          <div style={styles.heroCopy}>
-            Patient details, clinical context, and the printable sheet stay in one place so front desk and doctor can work from the same screen.
-          </div>
+          <div style={styles.heroBadge}><i className="ti ti-stethoscope" style={{ fontSize: 11 }} /> Patient Workspace</div>
+          <div style={styles.heroHeading}>{patient.name} — {visitOrdinal}</div>
           <div style={styles.heroActions}>
             <button style={styles.primaryAction} onClick={() => setShowPrescription(true)}>
-              <i className="ti ti-sparkles" style={{ fontSize: 14 }} /> Write prescription
+              <i className="ti ti-sparkles" style={{ fontSize: 13 }} /> Write Rx
             </button>
             <button style={styles.secondaryAction} onClick={() => setShowVisit(true)}>
-              <i className="ti ti-calendar-plus" style={{ fontSize: 14 }} /> Add visit
+              <i className="ti ti-calendar-plus" style={{ fontSize: 13 }} /> Add Visit
             </button>
             <button style={styles.secondaryAction} onClick={() => setShowLab(true)}>
-              <i className="ti ti-test-pipe" style={{ fontSize: 14 }} /> Add lab result
+              <i className="ti ti-test-pipe" style={{ fontSize: 13 }} /> Order Labs
             </button>
           </div>
         </div>
@@ -591,7 +588,7 @@ function AddVisitModal({ patientId, onClose, onSave }) {
   async function submit() {
     setSaving(true);
     try {
-      await addVisit({ ...form, patient_id: Number(patientId) });
+      await addVisit({ ...form, patient_id: Number(patientId), next_visit: form.next_visit || null });
       onSave();
     } catch {
       alert("Error saving visit");
@@ -651,59 +648,118 @@ const COMMON_LAB_TESTS = [
 ];
 
 function AddLabModal({ patientId, onClose, onSave }) {
+  const [queue, setQueue] = useState([]); // list of { name, urgency, notes }
   const [selectedTest, setSelectedTest] = useState("");
   const [customTest, setCustomTest] = useState("");
-  const [notes, setNotes] = useState("");
   const [urgency, setUrgency] = useState("routine");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const testName = selectedTest === "Custom test..." ? customTest : selectedTest;
+  const testName = selectedTest === "Custom test..." ? customTest.trim() : selectedTest;
+
+  function addToQueue() {
+    if (!testName) { alert("Please select or type a test name."); return; }
+    if (queue.find((q) => q.name === testName)) { alert("This test is already in the list."); return; }
+    setQueue((prev) => [...prev, { name: testName, urgency, notes }]);
+    setSelectedTest("");
+    setCustomTest("");
+    setUrgency("routine");
+    setNotes("");
+  }
+
+  function removeFromQueue(name) {
+    setQueue((prev) => prev.filter((q) => q.name !== name));
+  }
 
   async function submit() {
-    if (!testName.trim()) { alert("Please select or enter a test name."); return; }
+    const allTests = queue.length > 0 ? queue : (testName ? [{ name: testName, urgency, notes }] : []);
+    if (allTests.length === 0) { alert("Add at least one test to order."); return; }
     setSaving(true);
     try {
-      await addLabResult({
-        patient_id: Number(patientId),
-        test_name: testName.trim(),
-        result: "pending",
-        reference_range: urgency === "urgent" ? "URGENT" : notes || "",
-        test_date: localDateString(),
-        status: "normal",
-      });
+      await Promise.all(
+        allTests.map((t) =>
+          addLabResult({
+            patient_id: Number(patientId),
+            test_name: t.name,
+            result: "pending",
+            reference_range: t.urgency === "urgent" ? "URGENT" : t.notes || "",
+            test_date: localDateString(),
+            status: "normal",
+          })
+        )
+      );
       onSave();
     } catch {
-      alert("Error ordering lab test");
+      alert("Error ordering lab tests");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal title="Order Lab Test" onClose={onClose}>
-      <Field label="Select test">
-        <select style={styles.input} value={selectedTest} onChange={(event) => setSelectedTest(event.target.value)}>
-          <option value="">— Choose a common test —</option>
-          {COMMON_LAB_TESTS.map((test) => (
-            <option key={test} value={test}>{test}</option>
+    <Modal title="Order Lab Tests" onClose={onClose}>
+      {/* Queued tests */}
+      {queue.length > 0 && (
+        <div style={{ marginBottom: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+            Tests to order ({queue.length})
+          </div>
+          {queue.map((q) => (
+            <div key={q.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{q.name}</span>
+                {q.urgency === "urgent" && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", padding: "2px 7px", borderRadius: 999 }}>URGENT</span>}
+                {q.notes && <span style={{ marginLeft: 8, fontSize: 12, color: "#64748b" }}>· {q.notes}</span>}
+              </div>
+              <button onClick={() => removeFromQueue(q.name)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", fontSize: 16, lineHeight: 1, padding: "2px 4px" }}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
           ))}
-        </select>
-      </Field>
-      {selectedTest === "Custom test..." && (
-        <Field label="Custom test name">
-          <input style={styles.input} placeholder="Enter test name" value={customTest} onChange={(event) => setCustomTest(event.target.value)} />
-        </Field>
+        </div>
       )}
-      <Field label="Urgency">
-        <select style={styles.input} value={urgency} onChange={(event) => setUrgency(event.target.value)}>
-          <option value="routine">Routine</option>
-          <option value="urgent">Urgent</option>
-        </select>
-      </Field>
-      <Field label="Instructions / Notes for patient">
-        <input style={styles.input} placeholder="e.g. Fasting required, collect at lab 7–9 AM" value={notes} onChange={(event) => setNotes(event.target.value)} />
-      </Field>
-      <ModalFooter onClose={onClose} onSave={submit} saving={saving} saveLabel="Order Test" />
+
+      {/* Add a test */}
+      <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #dde7f3", background: "#f8fafc", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>Add test</div>
+        <Field label="Select test">
+          <select style={styles.input} value={selectedTest} onChange={(e) => setSelectedTest(e.target.value)}>
+            <option value="">— Choose a common test —</option>
+            {COMMON_LAB_TESTS.map((test) => (
+              <option key={test} value={test}>{test}</option>
+            ))}
+          </select>
+        </Field>
+        {selectedTest === "Custom test..." && (
+          <Field label="Custom test name">
+            <input style={styles.input} placeholder="Enter test name" value={customTest} onChange={(e) => setCustomTest(e.target.value)} />
+          </Field>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Urgency">
+            <select style={styles.input} value={urgency} onChange={(e) => setUrgency(e.target.value)}>
+              <option value="routine">Routine</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </Field>
+          <Field label="Notes (optional)">
+            <input style={styles.input} placeholder="e.g. Fasting required" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+        </div>
+        <button
+          onClick={addToQueue}
+          style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+        >
+          <i className="ti ti-plus" style={{ fontSize: 13 }} /> Add to list
+        </button>
+      </div>
+
+      <ModalFooter
+        onClose={onClose}
+        onSave={submit}
+        saving={saving}
+        saveLabel={`Order ${queue.length > 0 ? queue.length + " " : ""}Test${queue.length !== 1 ? "s" : ""}`}
+      />
     </Modal>
   );
 }
@@ -1051,83 +1107,87 @@ const styles = {
     boxShadow: "0 14px 30px rgba(34, 197, 94, 0.25)",
   },
   hero: {
-    margin: "0 22px 12px",
-    padding: 16,
-    borderRadius: 22,
+    margin: "0 18px 10px",
+    padding: "10px 14px",
+    borderRadius: 16,
     background: "linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #22c55e 130%)",
     color: "#fff",
     display: "flex",
-    gap: 14,
+    gap: 12,
+    alignItems: "center",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    boxShadow: "0 18px 40px rgba(29, 78, 216, 0.16)",
+    boxShadow: "0 10px 28px rgba(29, 78, 216, 0.16)",
   },
-  heroPrimary: { maxWidth: 760, minWidth: 260, flex: 1 },
+  heroPrimary: { minWidth: 220, flex: 1 },
   heroBadge: {
     display: "inline-flex",
-    padding: "5px 10px",
+    alignItems: "center",
+    gap: 5,
+    padding: "3px 9px",
     borderRadius: 999,
     background: "rgba(255,255,255,0.14)",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 700,
     letterSpacing: "0.04em",
     textTransform: "uppercase",
   },
-  heroHeading: { marginTop: 10, fontSize: 22, lineHeight: 1.15, fontWeight: 800, maxWidth: 780 },
-  heroCopy: { marginTop: 10, fontSize: 14, lineHeight: 1.7, color: "rgba(255,255,255,0.86)", maxWidth: 720 },
-  heroActions: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 },
+  heroHeading: { marginTop: 4, fontSize: 16, lineHeight: 1.2, fontWeight: 800 },
+  heroCopy: { display: "none" },
+  heroActions: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 },
   primaryAction: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 6,
-    padding: "11px 15px",
-    borderRadius: 12,
+    gap: 5,
+    padding: "7px 12px",
+    borderRadius: 10,
     border: "none",
     background: "#fff",
     color: "#0f172a",
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 800,
   },
   secondaryAction: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 6,
-    padding: "11px 15px",
-    borderRadius: 12,
+    gap: 5,
+    padding: "7px 12px",
+    borderRadius: 10,
     border: "1px solid rgba(255,255,255,0.2)",
     background: "rgba(255,255,255,0.08)",
     color: "#fff",
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 700,
   },
-  heroStats: { display: "grid", gridTemplateColumns: "repeat(3, minmax(120px, 1fr))", gap: 10, minWidth: 280, alignSelf: "stretch" },
+  heroStats: { display: "flex", gap: 8, flexWrap: "wrap" },
   metricCard: {
     background: "rgba(255,255,255,0.12)",
     border: "1px solid rgba(255,255,255,0.16)",
-    borderRadius: 18,
-    padding: "16px 14px",
+    borderRadius: 12,
+    padding: "10px 14px",
     display: "flex",
     flexDirection: "column",
-    justifyContent: "space-between",
-    minHeight: 120,
+    alignItems: "flex-start",
+    gap: 2,
+    minWidth: 80,
   },
-  metricIcon: { width: 36, height: 36, borderRadius: 12, display: "grid", placeItems: "center" },
-  metricValue: { marginTop: 18, fontSize: 28, fontWeight: 800 },
-  metricLabel: { fontSize: 12, color: "rgba(255,255,255,0.82)" },
+  metricIcon: { width: 26, height: 26, borderRadius: 8, display: "grid", placeItems: "center" },
+  metricValue: { fontSize: 20, fontWeight: 800, lineHeight: 1 },
+  metricLabel: { fontSize: 11, color: "rgba(255,255,255,0.72)" },
   modeBar: {
-    margin: "0 22px 16px",
+    margin: "0 18px 10px",
     background: "rgba(255,255,255,0.92)",
     border: "1px solid #dce7f5",
-    borderRadius: 18,
-    padding: 14,
+    borderRadius: 14,
+    padding: "8px 14px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
     flexWrap: "wrap",
-    boxShadow: "0 14px 40px rgba(15, 23, 42, 0.05)",
+    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.04)",
   },
   modeTabs: { display: "flex", gap: 8, flexWrap: "wrap" },
   modeTab: {
@@ -1148,21 +1208,21 @@ const styles = {
   modeLabel: { fontSize: 13, color: "#64748b" },
   body: {
     display: "flex",
-    gap: 14,
+    gap: 10,
     padding: "0 18px",
     flexWrap: "wrap",
     alignItems: "flex-start",
   },
-  mainColumn: { flex: "1 1 100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 },
+  mainColumn: { flex: "1 1 100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 },
   card: {
     background: "rgba(255,255,255,0.95)",
     border: "1px solid #dde7f3",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 18px 50px rgba(15, 23, 42, 0.06)",
+    borderRadius: 16,
+    padding: 14,
+    boxShadow: "0 8px 28px rgba(15, 23, 42, 0.05)",
     backdropFilter: "blur(12px)",
   },
-  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" },
+  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" },
   cardHeaderLeft: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   iconBubble: {
     width: 34,
@@ -1177,18 +1237,19 @@ const styles = {
   inlineActions: { display: "flex", gap: 8, flexWrap: "wrap" },
   patientCard: { display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" },
   avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     background: "linear-gradient(135deg, #dbeafe, #dcfce7)",
     color: "#1d4ed8",
     display: "grid",
     placeItems: "center",
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 800,
+    flexShrink: 0,
   },
-  patientName: { fontSize: 20, fontWeight: 800, color: "#0f172a" },
-  patientMeta: { fontSize: 13, color: "#64748b", marginTop: 3 },
+  patientName: { fontSize: 16, fontWeight: 800, color: "#0f172a" },
+  patientMeta: { fontSize: 12, color: "#64748b", marginTop: 2 },
   summaryPill: {
     display: "inline-flex",
     alignItems: "center",
@@ -1204,14 +1265,14 @@ const styles = {
   tagRow: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 },
   tag: { display: "inline-flex", alignItems: "center", padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: 700 },
   statusChip: { display: "inline-flex", alignItems: "center", padding: "5px 9px", borderRadius: 999, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em" },
-  detailGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 16 },
-  detailItem: { padding: 13, borderRadius: 16, background: "#f8fafc", border: "1px solid #e2e8f0" },
-  detailLabel: { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 },
-  detailValue: { marginTop: 6, fontSize: 14, color: "#0f172a", lineHeight: 1.55 },
-  snapshotGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 },
-  snapshotBlock: { padding: 14, borderRadius: 16, background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)", border: "1px solid #e2e8f0", minHeight: 110 },
-  snapshotTitle: { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 },
-  snapshotValue: { marginTop: 8, fontSize: 14, lineHeight: 1.65, color: "#0f172a", whiteSpace: "pre-wrap" },
+  detailGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 12 },
+  detailItem: { padding: "9px 12px", borderRadius: 12, background: "#f8fafc", border: "1px solid #e2e8f0" },
+  detailLabel: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 },
+  detailValue: { marginTop: 3, fontSize: 13, color: "#0f172a", lineHeight: 1.45 },
+  snapshotGrid: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 },
+  snapshotBlock: { padding: "10px 12px", borderRadius: 12, background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)", border: "1px solid #e2e8f0", minHeight: 80 },
+  snapshotTitle: { fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700 },
+  snapshotValue: { marginTop: 5, fontSize: 13, lineHeight: 1.55, color: "#0f172a", whiteSpace: "pre-wrap" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   th: {
     padding: "0 0 10px",
