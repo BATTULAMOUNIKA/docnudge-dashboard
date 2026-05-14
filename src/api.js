@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getToken } from "./auth";
 
-const BASE = import.meta.env.VITE_API_URL || "https://clinic-reminder-production-cbda.up.railway.app";
+const BASE = import.meta.env.VITE_API_URL || "https://api.docnudge.in";
 const API = axios.create({ baseURL: BASE });
 
 API.interceptors.request.use((c) => {

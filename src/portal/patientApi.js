@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || "https://clinic-reminder-production-cbda.up.railway.app";
+const API_BASE = import.meta.env.VITE_API_URL || "https://api.docnudge.in";
 const TOKEN_KEY = "docnudge_patient_token";
 
 export function savePatientToken(token) {
