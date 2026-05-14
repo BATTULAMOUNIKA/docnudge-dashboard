@@ -351,40 +351,43 @@ export default function OPSheet({ user }) {
           </SectionCard>
 
           <SectionCard
-            icon="ti-flask"
-            title="Investigations And Labs"
+            icon="ti-test-pipe"
+            title="Lab Test Orders"
             tag="Doctor"
             tagTone="green"
             action={
               <button style={styles.smallBtn} onClick={() => setShowLab(true)}>
-                <i className="ti ti-plus" style={{ fontSize: 12 }} /> Add
+                <i className="ti ti-plus" style={{ fontSize: 12 }} /> Order test
               </button>
             }
           >
             {latestLabs.length === 0 ? (
               <EmptyState
                 icon="ti-test-pipe"
-                title="No lab results yet"
-                description="Add routine lab values or reports so the patient record can show recent investigations."
-                buttonLabel="Add lab result"
+                title="No lab tests ordered yet"
+                description="Select from common lab tests to suggest investigations for this patient. Results can be recorded once available."
+                buttonLabel="Order lab test"
                 onClick={() => setShowLab(true)}
               />
             ) : (
               <div style={styles.labList}>
-                {latestLabs.map((lab) => (
-                  <div key={lab.id || `${lab.test_name}-${lab.test_date}`} style={styles.labRow}>
-                    <div>
-                      <div style={styles.labName}>{lab.test_name}</div>
-                      <div style={styles.labMeta}>{formatDate(lab.test_date) || "Undated"}{lab.reference_range ? ` | Ref: ${lab.reference_range}` : ""}</div>
+                {latestLabs.map((lab) => {
+                  const isPending = !lab.result || lab.result === "pending";
+                  return (
+                    <div key={lab.id || `${lab.test_name}-${lab.test_date}`} style={styles.labRow}>
+                      <div>
+                        <div style={styles.labName}>{lab.test_name}</div>
+                        <div style={styles.labMeta}>Ordered {formatDate(lab.test_date) || "today"}{lab.reference_range ? ` · ${lab.reference_range}` : ""}</div>
+                      </div>
+                      <div style={styles.labValueWrap}>
+                        {!isPending && <div style={styles.labValue}>{lab.result}</div>}
+                        <StatusChip tone={isPending ? "blue" : lab.status === "high" || lab.status === "low" ? "amber" : "green"}>
+                          {isPending ? "Pending" : labelizeStatus(lab.status || "normal")}
+                        </StatusChip>
+                      </div>
                     </div>
-                    <div style={styles.labValueWrap}>
-                      <div style={styles.labValue}>{lab.result}</div>
-                      <StatusChip tone={lab.status === "high" || lab.status === "low" ? "amber" : "green"}>
-                        {labelizeStatus(lab.status || "normal")}
-                      </StatusChip>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </SectionCard>
@@ -620,44 +623,87 @@ function AddVisitModal({ patientId, onClose, onSave }) {
   );
 }
 
+const COMMON_LAB_TESTS = [
+  "CBC (Complete Blood Count)",
+  "Blood Sugar Fasting",
+  "Blood Sugar PP (Post-Prandial)",
+  "HbA1c (Glycated Hemoglobin)",
+  "Lipid Profile",
+  "Thyroid Function Test (T3/T4/TSH)",
+  "Kidney Function Test (KFT/Creatinine)",
+  "Liver Function Test (LFT)",
+  "Urine Routine & Microscopy",
+  "Haemoglobin (Hb)",
+  "Serum Electrolytes (Na/K/Cl)",
+  "Vitamin D (25-OH)",
+  "Vitamin B12",
+  "Iron Studies (Serum Iron/Ferritin)",
+  "ESR / CRP",
+  "Blood Culture & Sensitivity",
+  "Chest X-Ray",
+  "ECG",
+  "Echocardiogram",
+  "Urine Pregnancy Test",
+  "Dengue NS1 / IgM / IgG",
+  "Covid Antigen / RT-PCR",
+  "PSA (Prostate Specific Antigen)",
+  "Custom test...",
+];
+
 function AddLabModal({ patientId, onClose, onSave }) {
-  const [form, setForm] = useState({ test_name: "", result: "", reference_range: "", test_date: localDateString(), status: "normal" });
+  const [selectedTest, setSelectedTest] = useState("");
+  const [customTest, setCustomTest] = useState("");
+  const [notes, setNotes] = useState("");
+  const [urgency, setUrgency] = useState("routine");
   const [saving, setSaving] = useState(false);
 
+  const testName = selectedTest === "Custom test..." ? customTest : selectedTest;
+
   async function submit() {
+    if (!testName.trim()) { alert("Please select or enter a test name."); return; }
     setSaving(true);
     try {
-      await addLabResult({ ...form, patient_id: Number(patientId) });
+      await addLabResult({
+        patient_id: Number(patientId),
+        test_name: testName.trim(),
+        result: "pending",
+        reference_range: urgency === "urgent" ? "URGENT" : notes || "",
+        test_date: localDateString(),
+        status: "normal",
+      });
       onSave();
     } catch {
-      alert("Error saving lab result");
+      alert("Error ordering lab test");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal title="Add lab result" onClose={onClose}>
-      <Field label="Test name">
-        <input style={styles.input} value={form.test_name} onChange={(event) => setForm((current) => ({ ...current, test_name: event.target.value }))} />
-      </Field>
-      <Field label="Result">
-        <input style={styles.input} value={form.result} onChange={(event) => setForm((current) => ({ ...current, result: event.target.value }))} />
-      </Field>
-      <Field label="Reference range">
-        <input style={styles.input} value={form.reference_range} onChange={(event) => setForm((current) => ({ ...current, reference_range: event.target.value }))} />
-      </Field>
-      <Field label="Test date">
-        <input type="date" style={styles.input} value={form.test_date} onChange={(event) => setForm((current) => ({ ...current, test_date: event.target.value }))} />
-      </Field>
-      <Field label="Status">
-        <select style={styles.input} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}>
-          <option value="normal">Normal</option>
-          <option value="high">High</option>
-          <option value="low">Low</option>
+    <Modal title="Order Lab Test" onClose={onClose}>
+      <Field label="Select test">
+        <select style={styles.input} value={selectedTest} onChange={(event) => setSelectedTest(event.target.value)}>
+          <option value="">— Choose a common test —</option>
+          {COMMON_LAB_TESTS.map((test) => (
+            <option key={test} value={test}>{test}</option>
+          ))}
         </select>
       </Field>
-      <ModalFooter onClose={onClose} onSave={submit} saving={saving} />
+      {selectedTest === "Custom test..." && (
+        <Field label="Custom test name">
+          <input style={styles.input} placeholder="Enter test name" value={customTest} onChange={(event) => setCustomTest(event.target.value)} />
+        </Field>
+      )}
+      <Field label="Urgency">
+        <select style={styles.input} value={urgency} onChange={(event) => setUrgency(event.target.value)}>
+          <option value="routine">Routine</option>
+          <option value="urgent">Urgent</option>
+        </select>
+      </Field>
+      <Field label="Instructions / Notes for patient">
+        <input style={styles.input} placeholder="e.g. Fasting required, collect at lab 7–9 AM" value={notes} onChange={(event) => setNotes(event.target.value)} />
+      </Field>
+      <ModalFooter onClose={onClose} onSave={submit} saving={saving} saveLabel="Order Test" />
     </Modal>
   );
 }
@@ -687,14 +733,14 @@ function Field({ label, children }) {
   );
 }
 
-function ModalFooter({ onClose, onSave, saving }) {
+function ModalFooter({ onClose, onSave, saving, saveLabel = "Save" }) {
   return (
     <div style={styles.modalFooter}>
       <button style={styles.modalBtnSecondary} onClick={onClose}>
         Cancel
       </button>
       <button style={styles.modalBtnPrimary} onClick={onSave} disabled={saving}>
-        {saving ? "Saving..." : "Save"}
+        {saving ? "Saving..." : saveLabel}
       </button>
     </div>
   );
