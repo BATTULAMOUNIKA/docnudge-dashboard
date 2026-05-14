@@ -229,7 +229,7 @@ function SecurityPanel({ user }) {
       <div style={styles.panelHeader}>
         <div>
           <h2 style={styles.panelTitle}>Password and access</h2>
-          <p style={styles.panelCopy}>{user?.email || "Current account"} · Keep your doctor login secure.</p>
+          <p style={styles.panelCopy}>{user?.login_id || user?.email || "Current account"} · Keep your doctor login secure.</p>
         </div>
         {saved && <span style={styles.savedPill}>Updated</span>}
       </div>
