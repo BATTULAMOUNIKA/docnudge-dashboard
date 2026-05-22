@@ -29,11 +29,13 @@ function buildVisitPayload(patientId, data) {
   const diagnoses = Array.isArray(data.diagnoses) ? data.diagnoses : [];
   const investigations = Array.isArray(data.investigations) ? data.investigations : [];
   const procedures = Array.isArray(data.procedures) ? data.procedures : [];
+  const complaintNote = data.complaintNote || data.compNote || "";
+  const historyNote = data.historyNote || "";
 
   const notes = [
     complaints.length ? `Chief complaints: ${complaints.join(", ")}` : "",
-    data.complaintNote ? `Complaint notes: ${data.complaintNote}` : "",
-    data.historyNote ? `History: ${data.historyNote}` : "",
+    complaintNote ? `Complaint notes: ${complaintNote}` : "",
+    historyNote ? `History: ${historyNote}` : "",
     diagnoses.length ? `Assessment: ${diagnoses.join(", ")}` : "",
     data.diagNote ? `Diagnosis notes: ${data.diagNote}` : "",
   ].filter(Boolean).join("\n");
@@ -63,8 +65,8 @@ function buildPrescriptionPayload(patientId, data) {
       name: String(row?.[0] || "").trim(),
       dosage: String(row?.[1] || "").trim(),
       frequency: String(row?.[2] || "").trim(),
-      duration: String(row?.[3] || "").trim(),
-      notes: "",
+      duration: String(row?.[4] || row?.[3] || "").trim(),
+      notes: [String(row?.[3] || "").trim(), String(row?.[5] || "").trim()].filter(Boolean).join(" | "),
     }))
     .filter((row) => row.name);
 
@@ -73,13 +75,14 @@ function buildPrescriptionPayload(patientId, data) {
   }
 
   const advice = Array.isArray(data.advice) ? data.advice : [];
+  const adviceNote = data.adviceNote || data.advNote || "";
   const diagnoses = Array.isArray(data.diagnoses) ? data.diagnoses : [];
 
   const notes = [
     diagnoses.length ? `Diagnosis: ${diagnoses.join(", ")}` : "",
     data.diagNote ? data.diagNote : "",
     advice.length ? `Advice: ${advice.join(", ")}` : "",
-    data.adviceNote ? data.adviceNote : "",
+    adviceNote ? adviceNote : "",
     data.followUpDate ? `Follow-up: ${data.followUpDate}` : "",
     data.followUpNote ? `Follow-up note: ${data.followUpNote}` : "",
   ].filter(Boolean).join("\n");
@@ -176,6 +179,7 @@ export default function OPSheet({ user }) {
         name: user?.doctor_name || user?.name || "Doctor",
         specialty: user?.speciality || user?.designation || "",
       }}
+      visitNo={visits.length + 1}
       onSave={handleSaveVisit}
       onSendWhatsApp={handleSaveAndSendPrescription}
     />
