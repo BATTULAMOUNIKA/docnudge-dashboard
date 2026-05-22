@@ -620,8 +620,8 @@ const DURATION = ["1 day","2 days","3 days","5 days","7 days","10 days","14 days
   "1 month","3 months","6 months","Lifelong","Ongoing","As directed","2 weeks","4 weeks","2 months",
 ];
 const VITALS_INIT = [
-  {k:"BP",v:"120/80",u:"mmHg"},{k:"Temp",v:"98.6",u:"°F"},
-  {k:"Pulse",v:"78",u:"bpm"},{k:"SpO2",v:"99",u:"%"},
+  {k:"BP",v:"",u:"mmHg"},{k:"Temp",v:"",u:"°F"},
+  {k:"Pulse",v:"",u:"bpm"},{k:"SpO2",v:"",u:"%"},
   {k:"Weight",v:"",u:"kg"},{k:"RBS",v:"",u:"mg/dL"},
 ];
 
@@ -642,45 +642,37 @@ const cb   = {padding:"8px 11px"};
 const slbl = {fontSize:"9px",fontWeight:800,color:c.t,textTransform:"uppercase",letterSpacing:".08em",padding:"5px 0 3px",display:"flex",alignItems:"center",gap:"5px"};
 const lbl  = {fontSize:"10px",fontWeight:600,color:c.m,marginBottom:"2px"};
 
-// ── AI LAB ANALYSIS helper (calls Claude API) ─────────────────────────────────
-async function analyseLabWithAI(tests) {
-  const rows = tests.map(t =>
-    `${t.testName} — ${t.param}: ${t.result} ${t.unit} (Normal range: ${t.range})`
-  ).join("\n");
-  const prompt = `You are a clinical assistant. Analyse these lab results and for each line return:
-1. Status: HIGH / LOW / NORMAL
-2. One-line clinical note (max 12 words)
-Return ONLY JSON array: [{"param":"...","status":"HIGH|LOW|NORMAL","note":"..."}]
-
-Results:
-${rows}`;
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      model:"claude-sonnet-4-20250514",
-      max_tokens:1000,
-      messages:[{role:"user",content:prompt}],
-    })
+// ── LOCAL LAB ANALYSIS (rule-based, works offline, no API key needed) ────────
+function analyseLabLocal(tests) {
+  return tests.map(t => {
+    const result = parseFloat(t.result);
+    if (isNaN(result)) return { param: t.param, status: "NORMAL", note: "Non-numeric — verify manually" };
+    const range = t.range || "";
+    // Strip gender prefix "M: " or "F: " and take first range segment
+    const seg = range.replace(/^[MFmf]\s*:\s*/,'').split(/\s*\/\s*/)[0].trim();
+    let low = null, high = null;
+    const ltM = seg.match(/^[<≤]\s*([\d.]+)/);
+    const gtM = seg.match(/^[>≥]\s*([\d.]+)/);
+    const rngM = seg.match(/^([\d.]+)\s*[-–]\s*([\d.]+)/);
+    if (ltM) high = parseFloat(ltM[1]);
+    else if (gtM) low = parseFloat(gtM[1]);
+    else if (rngM) { low = parseFloat(rngM[1]); high = parseFloat(rngM[2]); }
+    if (high !== null && result > high) return { param: t.param, status: "HIGH", note: "Above normal range" };
+    if (low !== null && result < low)   return { param: t.param, status: "LOW",  note: "Below normal range" };
+    if (high !== null || low !== null)  return { param: t.param, status: "NORMAL", note: "Within normal range" };
+    return { param: t.param, status: "NORMAL", note: "Check reference range manually" };
   });
-  const data = await res.json();
-  const text = data.content?.map(i=>i.text||"").join("") || "[]";
-  try {
-    const clean = text.replace(/```json|```/g,"").trim();
-    return JSON.parse(clean);
-  } catch { return []; }
 }
 
 // ── PRINT STYLES (injected once) ─────────────────────────────────────────────
 const printStyles = `
+@media screen { #op-print-area { display: none !important; } }
 @media print {
-  body * { visibility: hidden !important; }
-  #op-print-area, #op-print-area * { visibility: visible !important; }
+  body > *:not(#op-print-area) { display: none !important; }
   #op-print-area {
-    position: fixed !important; inset: 0 !important;
-    width: 100% !important; height: auto !important;
-    overflow: visible !important;
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
     background: white !important;
     padding: 12mm 14mm !important;
     font-family: 'Segoe UI', Arial, sans-serif !important;
@@ -734,7 +726,6 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
   const [labPanel, setLabPanel] = useState(false);
   const [labSearch, setLabSearch] = useState("");
   const [addedTests, setAddedTests] = useState([]);   // [{testName, param, unit, range, result, status, aiNote}]
-  const [aiLoading, setAiLoading] = useState(false);
   const recRef = useRef(null);
   const tRef   = useRef(null);
 
@@ -804,20 +795,16 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
   const removeTestParam=(idx)=>setAddedTests(p=>p.filter((_,i)=>i!==idx));
   const updateResult=(idx,val)=>setAddedTests(p=>p.map((t,i)=>i===idx?{...t,result:val,status:null,aiNote:""}:t));
 
-  const runAI = async ()=>{
+  const runAI = ()=>{
     const toAnalyse = addedTests.filter(t=>t.result.trim());
     if (!toAnalyse.length){ showToast("Enter at least one result first"); return; }
-    setAiLoading(true);
-    try {
-      const results = await analyseLabWithAI(toAnalyse);
-      setAddedTests(p=>p.map(t=>{
-        const found = results.find(r=>r.param===t.param);
-        if (found) return {...t,status:found.status,aiNote:found.note};
-        return t;
-      }));
-      showToast("✓ AI analysis complete");
-    } catch { showToast("AI error — check connection"); }
-    setAiLoading(false);
+    const results = analyseLabLocal(toAnalyse);
+    setAddedTests(p=>p.map(t=>{
+      const found = results.find(r=>r.param===t.param);
+      if (found) return {...t,status:found.status,aiNote:found.note};
+      return t;
+    }));
+    showToast("✓ Analysis complete");
   };
 
   // Shorthand
@@ -848,9 +835,17 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
 
   const updVital=(i,v)=>setVitals(p=>p.map((vt,j)=>j===i?{...vt,v}:vt));
 
-  const handleSave=()=>{
-    onSave?.({complaints:selC,compNote,labResults:addedTests,investigations:selInv,invNote,diagnoses:selD,diagNote,rx:rxList,advice:selAdv,advNote,procedures:selProc,procNote,vitals,followUpDate:fuDate,followUpNote:fuNote,followUpReminder:fuRemind});
-    showToast("✓ Visit saved — reminder scheduled!");
+  const handleSaveAndSend = async ()=>{
+    const payload = {complaints:selC,compNote,labResults:addedTests,investigations:selInv,invNote,diagnoses:selD,diagNote,rx:rxList,advice:selAdv,advNote,procedures:selProc,procNote,vitals,followUpDate:fuDate,followUpNote:fuNote,followUpReminder:fuRemind};
+    try {
+      await onSave?.(payload);
+      await onSendWhatsApp?.(payload);
+      const phone = patient?.phone?.replace(/\D/g,"");
+      const msg = buildWAMessage();
+      const url = phone ? `https://wa.me/91${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
+      window.open(url,"_blank");
+      showToast("✓ Saved & prescription sent!");
+    } catch(e){ showToast("Error: "+(e?.message||"Save failed")); }
   };
 
   const statusColor=(s)=>s==="HIGH"?"#dc2626":s==="LOW"?"#2563eb":s==="NORMAL"?"#16a34a":"#94a3b8";
@@ -858,7 +853,7 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
 
   // ── PRINT AREA data ──────────────────────────────────────────────────────────
   const PrintArea = () => (
-    <div id="op-print-area" style={{display:"none",fontFamily:"'Segoe UI',Arial,sans-serif",fontSize:"11pt",color:"#000",background:"#fff",padding:"12mm 14mm"}}>
+    <div id="op-print-area" style={{fontFamily:"'Segoe UI',Arial,sans-serif",fontSize:"11pt",color:"#000",background:"#fff",padding:"12mm 14mm"}}>
       {/* Header */}
       <div style={{borderBottom:"2px solid #0f766e",paddingBottom:"8px",marginBottom:"10px",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
@@ -995,24 +990,11 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
     return encodeURIComponent(lines.join("\n"));
   };
 
-  const handleWA = () => {
-    onSendWhatsApp?.({rx:rxList,diagnoses:selD});
-    const phone = patient?.phone?.replace(/\D/g,"");
-    const msg = buildWAMessage();
-    const url = phone ? `https://wa.me/91${phone}?text=${msg}` : `https://wa.me/?text=${msg}`;
-    window.open(url,"_blank");
-    showToast("✓ Opening WhatsApp...");
-  };
-
-  const handlePrint = () => {
-    const el = document.getElementById("op-print-area");
-    if (el) el.style.display = "block";
-    window.print();
-    setTimeout(()=>{ if(el) el.style.display="none"; },1000);
-  };
+  const handlePrint = () => { window.print(); };
 
   // ── RENDER ───────────────────────────────────────────────────────────────────
   return (
+    <>
     <div style={{display:"grid",gridTemplateColumns:"210px 1fr",height:"100vh",background:c.w,fontFamily:"'Segoe UI',system-ui,sans-serif",fontSize:"12px",color:c.s,position:"relative",overflow:"hidden"}} className="no-print">
 
       {/* ── SIDEBAR ── */}
@@ -1149,8 +1131,8 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
               <span style={ct}>Lab Results (Previous / Recent)</span>
               <div style={{display:"flex",gap:"4px"}}>
                 {addedTests.filter(t=>t.result).length>0&&(
-                  <button style={{padding:"3px 8px",borderRadius:"4px",border:"none",background:aiLoading?"#94a3b8":c.t,color:"#fff",fontSize:"10px",fontWeight:600,cursor:"pointer"}} onClick={runAI} disabled={aiLoading}>
-                    {aiLoading?"⏳ Analysing...":"🤖 AI Analyse"}
+                  <button style={{padding:"3px 8px",borderRadius:"4px",border:"none",background:c.t,color:"#fff",fontSize:"10px",fontWeight:600,cursor:"pointer"}} onClick={runAI}>
+                    📊 Analyse
                   </button>
                 )}
                 <button style={{padding:"3px 8px",borderRadius:"4px",border:`0.5px solid ${c.t}`,background:c.tl,color:c.t,fontSize:"10px",fontWeight:600,cursor:"pointer"}} onClick={()=>setLabPanel(v=>!v)}>
@@ -1217,8 +1199,8 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                       })}
                     </div>
                   ))}
-                  {addedTests.filter(t=>t.result).length>0&&!aiLoading&&addedTests.some(t=>!t.status)&&(
-                    <div style={{fontSize:"10px",color:c.m,marginTop:"4px"}}>💡 Enter results then click <b>🤖 AI Analyse</b> for status & clinical notes</div>
+                  {addedTests.some(t=>t.result&&!t.status)&&(
+                    <div style={{fontSize:"10px",color:c.m,marginTop:"4px"}}>💡 Results entered — click <b>📊 Analyse</b> to get HIGH/LOW/NORMAL status</div>
                   )}
                 </div>
               ):(
@@ -1400,24 +1382,12 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
 
         {/* ── ACTION BAR ── */}
         <div style={{padding:"7px 12px",borderTop:`0.5px solid ${c.b}`,display:"flex",alignItems:"center",justifyContent:"space-between",background:c.w,flexShrink:0}} className="no-print">
-          <div style={{display:"flex",gap:"5px"}}>
-            <button style={{padding:"5px 9px",borderRadius:"5px",border:`0.5px solid ${c.b}`,background:c.w,color:c.m,fontSize:"11px",fontWeight:600,cursor:"pointer"}} onClick={handlePrint}>🖨 Print</button>
-            <button style={{padding:"5px 9px",borderRadius:"5px",border:`0.5px solid ${c.b}`,background:c.w,color:c.m,fontSize:"11px",fontWeight:600,cursor:"pointer"}} onClick={()=>showToast("Lab form ready")}>🧪 Labs</button>
-            <button style={{padding:"5px 9px",borderRadius:"5px",border:`0.5px solid ${c.b}`,background:c.w,color:c.m,fontSize:"11px",fontWeight:600,cursor:"pointer"}} onClick={()=>showToast("Upload ready")}>📎 Report</button>
-          </div>
-          <div style={{display:"flex",gap:"6px"}}>
-            <button style={{padding:"5px 12px",borderRadius:"5px",border:"none",background:"#22c55e",color:"#fff",fontSize:"11px",fontWeight:700,cursor:"pointer"}} onClick={handleWA}>
-              💬 Send Rx via WhatsApp
-            </button>
-            <button style={{padding:"5px 16px",borderRadius:"5px",border:"none",background:c.t,color:"#fff",fontSize:"11px",fontWeight:700,cursor:"pointer"}} onClick={handleSave}>
-              💾 Save &amp; Send Rx
-            </button>
-          </div>
+          <button style={{padding:"5px 9px",borderRadius:"5px",border:`0.5px solid ${c.b}`,background:c.w,color:c.m,fontSize:"11px",fontWeight:600,cursor:"pointer"}} onClick={handlePrint}>🖨 Print</button>
+          <button style={{padding:"5px 18px",borderRadius:"5px",border:"none",background:c.t,color:"#fff",fontSize:"11px",fontWeight:700,cursor:"pointer"}} onClick={handleSaveAndSend}>
+            💾 Save &amp; Send Rx
+          </button>
         </div>
       </div>
-
-      {/* ── PRINT AREA (hidden, shown only on print) ── */}
-      <PrintArea/>
 
       {/* ── TOAST ── */}
       {toast&&(
@@ -1426,5 +1396,7 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
         </div>
       )}
     </div>
+    <PrintArea/>
+    </>
   );
 }
