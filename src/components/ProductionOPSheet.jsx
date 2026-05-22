@@ -683,6 +683,10 @@ const printStyles = `
 }
 `;
 
+// ── CUSTOM OPTIONS PERSISTENCE ────────────────────────────────────────────────
+const loadCustom = (key) => { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; } };
+const saveCustom = (key, arr) => { try { localStorage.setItem(key, JSON.stringify(arr)); } catch {} };
+
 export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsApp, onClose }) {
   // inject print styles once
   useEffect(()=>{
@@ -726,6 +730,30 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
   const [labPanel, setLabPanel] = useState(false);
   const [labSearch, setLabSearch] = useState("");
   const [addedTests, setAddedTests] = useState([]);   // [{testName, param, unit, range, result, status, aiNote}]
+
+  // Custom options — persisted per department in localStorage
+  const [custC,    setCustC]    = useState(()=>loadCustom(`dn_c_${deptKey}`));
+  const [custD,    setCustD]    = useState(()=>loadCustom(`dn_d_${deptKey}`));
+  const [custAdv,  setCustAdv]  = useState(()=>loadCustom(`dn_a_${deptKey}`));
+  const [custProc, setCustProc] = useState(()=>loadCustom(`dn_p_${deptKey}`));
+  const [custInv,  setCustInv]  = useState(()=>loadCustom(`dn_i_${deptKey}`));
+  const [custMeds, setCustMeds] = useState(()=>loadCustom("dn_meds"));
+
+  // Merged lists (defaults + anything the doctor has added before)
+  const allComplaints = [...dept.complaints, ...custC.filter(v=>!dept.complaints.includes(v))];
+  const allDiag       = [...dept.diag,       ...custD.filter(v=>!dept.diag.includes(v))];
+  const allAdv        = [...dept.advice,     ...custAdv.filter(v=>!dept.advice.includes(v))];
+  const allProc       = [...dept.proc,       ...custProc.filter(v=>!dept.proc.includes(v))];
+  const allInv        = [...dept.investigations, ...custInv.filter(v=>!dept.investigations.includes(v))];
+  const allMeds       = [...MEDS, ...custMeds.filter(v=>!MEDS.includes(v))];
+
+  // Persist a new custom value if not already in the list
+  const addCustomOpt = (key, setter, existing, value) => {
+    const v = value.trim();
+    if (!v || existing.includes(v)) return;
+    setter(prev => { const u=[...prev,v]; saveCustom(key,u); return u; });
+  };
+
   const recRef = useRef(null);
   const tRef   = useRef(null);
 
@@ -778,8 +806,12 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
   const medSug = (i,val)=>{
     updRx(i,0,val);
     if (val.length<2){setSugg(s=>({...s,[i]:null}));return;}
-    const m=MEDS.filter(x=>x.toLowerCase().includes(val.toLowerCase())).slice(0,6);
+    const m=allMeds.filter(x=>x.toLowerCase().includes(val.toLowerCase())).slice(0,8);
     setSugg(s=>({...s,[i]:m.length?m:null}));
+  };
+  const saveMedIfNew = (val) => {
+    const v = val.trim();
+    if (v.length>1) addCustomOpt("dn_meds", setCustMeds, allMeds, v);
   };
   const pickMed=(i,med)=>{ updRx(i,0,med); setSugg(s=>({...s,[i]:null})); };
   const setFuQ=(d)=>{ if(!d)return; const dt=new Date(); dt.setDate(dt.getDate()+parseInt(d)); setFuDate(dt.toISOString().split("T")[0]); };
@@ -1093,10 +1125,14 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
               </div>
             </div>
             <div style={cb}>
-              <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"7px"}}>
-                {dept.complaints.map(x=>(
+              <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"5px"}}>
+                {allComplaints.map(x=>(
                   <span key={x} style={chip(selC.includes(x))} onClick={()=>toggleComplaint(x)}>{x}</span>
                 ))}
+              </div>
+              <div style={{display:"flex",gap:"4px",marginBottom:"7px"}}>
+                <input style={{...inp,flex:1,height:"26px",fontSize:"10px"}} placeholder="+ Add custom complaint (Enter to save & select)"
+                  onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){const v=e.target.value.trim();addCustomOpt(`dn_c_${deptKey}`,setCustC,allComplaints,v);toggleComplaint(v);e.target.value="";}}}/>
               </div>
               <div style={{display:"flex",gap:"4px",marginBottom:"5px"}}>
                 <span style={{fontSize:"9px",color:c.m,fontWeight:600,alignSelf:"center"}}>Notes:</span>
@@ -1213,10 +1249,14 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
           <div style={card}>
             <div style={ch}><span style={ct}>Investigations Advised</span></div>
             <div style={cb}>
-              <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"6px"}}>
-                {dept.investigations.map(x=>(
+              <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"5px"}}>
+                {allInv.map(x=>(
                   <span key={x} style={chip(selInv.includes(x))} onClick={()=>toggleInv(x)}>{x}</span>
                 ))}
+              </div>
+              <div style={{display:"flex",gap:"4px",marginBottom:"5px"}}>
+                <input style={{...inp,flex:1,height:"26px",fontSize:"10px"}} placeholder="+ Add custom investigation (Enter to save & select)"
+                  onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){const v=e.target.value.trim();addCustomOpt(`dn_i_${deptKey}`,setCustInv,allInv,v);toggleInv(v);e.target.value="";}}}/>
               </div>
               <div style={{fontSize:"9px",color:c.m,marginBottom:"3px"}}>Additional notes (keywords auto-add below):</div>
               <textarea style={{...ta,height:"52px"}} value={invNote} onChange={e=>setInvNote(e.target.value)} placeholder="Selected investigations appear here. Edit or add custom tests..."/>
@@ -1232,8 +1272,10 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                 <div style={lbl}>Select diagnosis</div>
                 <select style={sel} onChange={e=>{addDiag(e.target.value);e.target.value="";}}>
                   <option value="">— Select —</option>
-                  {dept.diag.map(d=><option key={d}>{d}</option>)}
+                  {allDiag.map(d=><option key={d}>{d}</option>)}
                 </select>
+                <input style={{...inp,marginTop:"4px",fontSize:"10px"}} placeholder="+ Type new diagnosis + Enter to save for future"
+                  onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){const v=e.target.value.trim();addCustomOpt(`dn_d_${deptKey}`,setCustD,allDiag,v);addDiag(v);e.target.value="";}}}/>
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"5px"}}>
                 {selD.map(d=>(
@@ -1268,7 +1310,7 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
               {rxList.map((r,i)=>(
                 <div key={i} style={{display:"grid",gridTemplateColumns:"2.4fr 80px 100px 90px 80px 1fr 18px",gap:"4px",marginBottom:"4px",alignItems:"start"}}>
                   <div style={{position:"relative"}}>
-                    <input style={{...inp,fontWeight:500}} value={r[0]} placeholder="Medicine name" onChange={e=>medSug(i,e.target.value)}/>
+                    <input style={{...inp,fontWeight:500}} value={r[0]} placeholder="Medicine name" onChange={e=>medSug(i,e.target.value)} onBlur={e=>saveMedIfNew(e.target.value)}/>
                     {sugg[i]&&(
                       <div style={{position:"absolute",top:"100%",left:0,right:0,background:c.w,border:`0.5px solid ${c.b}`,borderRadius:"5px",zIndex:30,maxHeight:"90px",overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,.08)"}}>
                         {sugg[i].map(m=>(
@@ -1310,8 +1352,10 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                 <div style={{marginBottom:"6px"}}>
                   <select style={sel} onChange={e=>{if(e.target.value)toggleAdv(e.target.value);e.target.value="";}}>
                     <option value="">— Add advice —</option>
-                    {dept.advice.map(a=><option key={a}>{a}</option>)}
+                    {allAdv.map(a=><option key={a}>{a}</option>)}
                   </select>
+                  <input style={{...inp,marginTop:"4px",fontSize:"10px"}} placeholder="+ Type new advice + Enter to save for future"
+                    onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){const v=e.target.value.trim();addCustomOpt(`dn_a_${deptKey}`,setCustAdv,allAdv,v);toggleAdv(v);e.target.value="";}}}/>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"5px"}}>
                   {selAdv.map(a=>(
@@ -1330,8 +1374,10 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                 <div style={{marginBottom:"6px"}}>
                   <select style={sel} onChange={e=>{if(e.target.value)toggleProc(e.target.value);e.target.value="";}}>
                     <option value="">— Select procedure —</option>
-                    {dept.proc.map(p2=><option key={p2}>{p2}</option>)}
+                    {allProc.map(p2=><option key={p2}>{p2}</option>)}
                   </select>
+                  <input style={{...inp,marginTop:"4px",fontSize:"10px"}} placeholder="+ Type new procedure + Enter to save for future"
+                    onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){const v=e.target.value.trim();addCustomOpt(`dn_p_${deptKey}`,setCustProc,allProc,v);toggleProc(v);e.target.value="";}}}/>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:"3px",marginBottom:"5px"}}>
                   {selProc.map(p2=>(
