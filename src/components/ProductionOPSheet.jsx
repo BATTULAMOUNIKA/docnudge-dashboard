@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 // ── COMPREHENSIVE LAB TESTS DATABASE ──────────────────────────────────────────
 const LAB_TESTS = [
@@ -668,7 +669,7 @@ function analyseLabLocal(tests) {
 const printStyles = `
 @media screen { #op-print-area { display: none !important; } }
 @media print {
-  body > *:not(#op-print-area) { display: none !important; }
+  body > * { display: none !important; }
   #op-print-area {
     display: block !important;
     position: static !important;
@@ -938,7 +939,7 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                   <td style={{border:"1px solid #ccc",padding:"4px 6px",textAlign:"center",fontWeight:700,color:statusColor(t.status)}}>{t.result}</td>
                   <td style={{border:"1px solid #ccc",padding:"4px 6px",textAlign:"center",color:"#555"}}>{t.unit}</td>
                   <td style={{border:"1px solid #ccc",padding:"4px 6px",textAlign:"center",fontWeight:700,color:statusColor(t.status)}}>{t.status||"—"}</td>
-                  <td style={{border:"1px solid #ccc",padding:"4px 6px",fontSize:"9pt",color:"#555"}}>{t.aiNote||t.range}</td>
+                  <td style={{border:"1px solid #ccc",padding:"4px 6px",fontSize:"9pt",color:"#555"}}>{t.range}{t.aiNote&&<span style={{color:t.status==="HIGH"?"#ef4444":t.status==="LOW"?"#3b82f6":"#16a34a",fontWeight:700,marginLeft:"4px"}}>→ {t.aiNote}</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -1226,8 +1227,8 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
                                   {t.status}
                                 </span>
                               )}
-                              {t.aiNote&&<span style={{fontSize:"9px",color:c.m,lineHeight:"1.3"}}>{t.aiNote}</span>}
-                              {!t.aiNote&&<span style={{fontSize:"9px",color:"#cbd5e1",lineHeight:"1.3"}}>{t.range}</span>}
+                              {t.range&&<span style={{fontSize:"9px",color:"#cbd5e1",lineHeight:"1.3"}}>{t.range}</span>}
+                              {t.aiNote&&<span style={{fontSize:"9px",color:t.status==="HIGH"?"#ef4444":t.status==="LOW"?"#3b82f6":"#16a34a",fontWeight:700,lineHeight:"1.3",marginLeft:"4px"}}>→ {t.aiNote}</span>}
                             </div>
                             <button style={{width:"18px",height:"18px",borderRadius:"3px",border:"0.5px solid #fca5a5",background:"#fef2f2",color:"#ef4444",fontSize:"10px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>removeTestParam(idx)}>✕</button>
                           </div>
@@ -1442,7 +1443,7 @@ export default function OPSheet({ patient, doctor, visitNo, onSave, onSendWhatsA
         </div>
       )}
     </div>
-    <PrintArea/>
+    {createPortal(<PrintArea/>, document.body)}
     </>
   );
 }
